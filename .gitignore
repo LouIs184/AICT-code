@@ -1,0 +1,39 @@
+# AICTVer2 .gitignore
+
+# Training outputs
+/runs/
+/results/
+/results_proj/
+
+# Data indices (contain absolute paths)
+train_img.txt
+valid_img.txt
+train_proj_img.txt
+valid_proj_img.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+venv/
+.venv/

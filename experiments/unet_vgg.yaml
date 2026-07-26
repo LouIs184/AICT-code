@@ -1,0 +1,41 @@
+# UNet2d + VGG perceptual loss
+# Equivalent to the original train_unet_2d_vgg.py
+experiment:
+  name: UNet_VGG
+  seed: 1234
+
+data:
+  reader: raw
+  train_txt: ./train_img.txt
+  valid_txt: ./valid_img.txt
+  batch_size: 12
+  valid_batch_size: 1
+  num_workers: 8
+
+model:
+  name: UNet2d
+  in_chl: 1
+  out_chl: 1
+  model_chl: 32
+
+loss:
+  mse_weight: 1.0
+  vgg_weight: 0.0          # Set to enable VGG loss (original used mse only)
+  ssim_weight: 0.0
+
+optimizer:
+  name: Adam
+  lr: 0.0001
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+  weight_decay: 0.0
+
+scheduler:
+  name: StepLR
+  step_size: 2
+  gamma: 0.95
+
+training:
+  epochs: 200
+  save_dir: ./runs/UNet_VGG
+  log_dir: ./runs/UNet_VGG

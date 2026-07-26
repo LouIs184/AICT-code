@@ -1,0 +1,45 @@
+# UNet2d + GAN (WGAN-GP) training
+# Equivalent to the original train_unet_2d_gan.py
+experiment:
+  name: UNet_GAN
+  seed: 1234
+
+data:
+  reader: dicom
+  train_txt: ./valid_img.txt    # Note: original GAN script used valid_img for training
+  valid_txt: ./valid_img.txt
+  batch_size: 12
+  valid_batch_size: 1
+  num_workers: 16
+
+model:
+  name: UNet2d
+  in_chl: 1
+  out_chl: 1
+  model_chl: 32
+
+loss:
+  mse_weight: 1.0
+  adv_weight: 0.01
+
+optimizer:
+  name: Adam
+  lr: 0.0001
+  betas: [0.5, 0.9]
+  eps: 1.0e-8
+  weight_decay: 0.0
+
+scheduler:
+  name: StepLR
+  step_size: 100
+  gamma: 0.1
+
+gan:
+  d_lr: 0.0001
+  d_betas: [0.5, 0.9]
+  gp_weight: 10.0
+
+training:
+  epochs: 1000
+  save_dir: ./runs/UNet_GAN
+  log_dir: ./runs/UNet_GAN
