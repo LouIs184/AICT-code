@@ -150,8 +150,12 @@ class Trainer:
             raise ValueError(f"Unknown reader: {dc.reader}")
 
         reader_kwargs = {}
-        if dc.reader == "proj":
+        if dc.reader == "raw":
+            reader_kwargs["hu_min"] = dc.hu_min
+            reader_kwargs["hu_max"] = dc.hu_max
+        elif dc.reader == "proj":
             reader_kwargs["norm_clip_max"] = dc.norm_clip_max
+            reader_kwargs["crop_rows"] = dc.crop_rows
 
         self.train_dataset = reader_cls(paired_img_txt=dc.train_txt, **reader_kwargs)
         self.valid_dataset = reader_cls(paired_img_txt=dc.valid_txt, **reader_kwargs)

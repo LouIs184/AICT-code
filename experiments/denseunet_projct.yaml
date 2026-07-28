@@ -13,6 +13,7 @@ data:
   num_workers: 8
   shuffle: true
   norm_clip_max: 0.28
+  crop_rows: 8
 
 model:
   name: DenseUNet2d
@@ -44,6 +45,6 @@ training:
   epochs: 200
   save_dir: ./runs/DenseUNet_ProjCT
   log_dir: ./runs/DenseUNet_ProjCT
-  log_interval: 20
+  log_interval: 1
   viz_interval: 1
-  save_interval: 10
+  save_interval: 20

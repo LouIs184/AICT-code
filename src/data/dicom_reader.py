@@ -50,10 +50,10 @@ class dicom_reader(Dataset):
         parts = paired_str.strip().split()
         ldct_path, rdct_path = parts[0], parts[-1]
 
-        ldct_img = pydicom.read_file(ldct_path).pixel_array
+        ldct_img = pydicom.dcmread(ldct_path).pixel_array
         ldct_img = np.maximum(ldct_img, 0)
 
-        rdct_img = pydicom.read_file(rdct_path).pixel_array
+        rdct_img = pydicom.dcmread(rdct_path).pixel_array
         rdct_img = np.maximum(rdct_img, 0)
 
         ldct_img = ldct_img.astype(np.float32)

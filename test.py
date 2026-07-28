@@ -128,6 +128,12 @@ def _infer_proj(args, model):
     ]
     patients = args.patient or default_patients
 
+    # Read crop_rows from config (same as training)
+    from src.config import load_config
+    infer_cfg = load_config(args.config)
+    crop_rows = getattr(infer_cfg.data, "crop_rows", 0)
+    target_rows = 128 - 2 * crop_rows if crop_rows > 0 else 128
+
     for patient in patients:
         print(f"\nTesting {patient} (proj domain) ...")
         patient_dir = os.path.join(args.data_dir, patient)
@@ -145,16 +151,20 @@ def _infer_proj(args, model):
         norm_clip_max = 0.28
         preds = []
         for i in tqdm(range(720), desc=f"  Inferring {patient}"):
-            s = (np.clip(vol[i], 0, norm_clip_max) / norm_clip_max).astype(np.float32)
+            s = vol[i]  # (128, 512)
+            # Crop black border rows (must match training)
+            if crop_rows > 0:
+                s = s[crop_rows:-crop_rows, :]
+            s = (np.clip(s, 0, norm_clip_max) / norm_clip_max).astype(np.float32)
             t = torch.FloatTensor(s[np.newaxis, np.newaxis, ...]).cuda()
             with torch.no_grad():
                 p = model(t)
             pred = np.squeeze(p.cpu().numpy()) * norm_clip_max
             preds.append(pred)
 
-        pred_vol = np.array(preds)
+        pred_vol = np.array(preds)  # (720, target_rows, 512)
         pred_vol.tofile(os.path.join(args.output, f"{patient}_pred.raw"))
-        print(f"  Saved to {args.output}/{patient}_pred.raw")
+        print(f"  Saved to {args.output}/{patient}_pred.raw (shape {pred_vol.shape})")
 
 
 if __name__ == "__main__":

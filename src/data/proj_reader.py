@@ -24,7 +24,7 @@ class proj_reader(Dataset):
     Each line indexes a single view from a (720, 128, 512) projection volume.
     """
 
-    def __init__(self, paired_img_txt, norm_clip_max=0.28):
+    def __init__(self, paired_img_txt, norm_clip_max=0.28, crop_rows=0):
         super().__init__()
         try:
             with open(paired_img_txt, encoding="utf-8") as f:
@@ -33,6 +33,7 @@ class proj_reader(Dataset):
             with open(paired_img_txt, encoding=locale.getpreferredencoding()) as f:
                 self.paired_files = f.readlines()
         self.norm_clip_max = norm_clip_max
+        self.crop_rows = crop_rows
 
     def __len__(self):
         return len(self.paired_files)
@@ -55,6 +56,11 @@ class proj_reader(Dataset):
             label_path, dtype=np.float32,
             count=view_size, offset=byte_offset
         ).reshape(128, 512)
+
+        # Crop black border rows (top & bottom)
+        if self.crop_rows > 0:
+            input_view = input_view[self.crop_rows:-self.crop_rows, :]
+            label_view = label_view[self.crop_rows:-self.crop_rows, :]
 
         # Normalize to [0, 1]
         input_view = np.clip(input_view, 0, self.norm_clip_max) / self.norm_clip_max

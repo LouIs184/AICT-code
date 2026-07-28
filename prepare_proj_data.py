@@ -28,23 +28,24 @@ def main():
     args = parser.parse_args()
     os.makedirs(args.output, exist_ok=True)
 
-    # Default split (same patients as PhaseCT)
+    # Default split — MUST match prepare_data.py (image domain) exactly.
+    # All domains (PhaseCT, ProjCT, etc.) must use the same patient split.
     default_train = [
-        "17424_960+_AXIAL_CE1_M058Y_20221101_Thick1_Incre1",
-        "18437_1005_960+_AXIAL_CE1_F059Y_20220406_Thick1_Incre1",
-        "18847_7779_960+_AXIAL_CE1_F060Y_20220111_Thick1_Incre1",
-        "19824_30332_960+_AXIAL_CE1_M059Y_20220915_Thick1_Incre1",
-        "17238_33314_960+_AXIAL_CE1_F063Y_20220106_Thick1_Incre1",
+        "11034_307811_960+_AXIAL_CE1_M067Y_20211215_Thick1_Incre1",
+        "11849_308361_960+_AXIAL_CE1_M044Y_20211216_Thick1_Incre1",
+        "15962_15633_960+_AXIAL_CE1_M034Y_20200601_Thick1_Incre1",
+        "15962_35868_960+_AXIAL_CE1_M034Y_20200601_Thick1_Incre1",
+        "18631_303226_960+_AXIAL_CE1_F058Y_20211216_Thick1_Incre1",
         "38423_35948_960+_AXIAL_CE1_M049Y_20200601_Thick1_Incre1",
-        "28637_1359_960+_AXIAL_CE1_F062Y_20200413_Thick1_Incre1",
-        "2116_1770_960+_AXIAL_CE1_F066Y_20200527_Thick1_Incre1",
-        "2_20743_960+_AXIAL_CE1_F040Y_20200508_Thick1_Incre1",
-        "26076_2484_960+_AXIAL_CE1_F064Y_20200331_Thick1_Incre1",
-        "18537_23851_960+_AXIAL_CE1_F062Y_20200402_Thick1_Incre1",
+        "51741_308269_960+_AXIAL_CE1_M048Y_20211215_Thick1_Incre1",
+        "51789_393117_960+_AXIAL_CE1_M074Y_20211215_Thick1_Incre1",
+        "72278_406010_960+_AXIAL_CE1_F071Y_20211216_Thick1_Incre1",
+        "91963_301643_960+_AXIAL_CE1_M070Y_20211216_Thick1_Incre1",
+        "91963_53624_960+_AXIAL_CE1_M070Y_20211216_Thick1_Incre1",
     ]
     default_valid = [
         "17238_33314_960+_AXIAL_CE1_F063Y_20220106_Thick1_Incre1",
-        "38423_35948_960+_AXIAL_CE1_M049Y_20200601_Thick1_Incre1",
+        "18537_93073_960+_AXIAL_CE0_M067Y_20210430_Thick1_Incre1",
     ]
 
     train_patients = args.train_patients or default_train

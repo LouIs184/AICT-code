@@ -39,7 +39,8 @@ pip install scipy scikit-image opencv-python
 
 读取器：`src/data/raw_reader.py`
 - 按切片索引取出单张切片 `(1, 512, 512)`
-- HU 归一化：`(x + 1000) / 2000`，将 `[-1000, +1000]` 映射到 `[0, 1]`，再 clip
+- HU 归一化：`(x - hu_min) / (hu_max - hu_min)`，默认 `hu_min=-1000, hu_max=1000`，映射到 `[0, 1]`，再 clip
+- `hu_min` / `hu_max` 可通过 YAML 的 `data.hu_min` / `data.hu_max` 配置
 
 ### 1.2 投影域（ProjCT）
 
@@ -55,6 +56,7 @@ pip install scipy scikit-image opencv-python
 
 读取器：`src/data/proj_reader.py`
 - 使用 `np.fromfile` + seek 偏移，避免全量读取，I/O 效率高
+- 支持通过 YAML 的 `data.crop_rows` 字段上下裁剪黑边，见 5.1 节
 
 ---
 
@@ -156,6 +158,10 @@ python prepare_proj_data.py --data-dir /path/to/UIH_data --output ./
 生成：
 - `train_proj_img.txt` — 11 个病人 × 720 视角 = 7920 条
 - `valid_proj_img.txt` — 2 个病人 × 720 视角 = 1440 条
+
+注：服务器上数据路径为：/root/autodl-tmp/联影双能相位数据2080
+
+> ⚠️ **重要：所有数据域的 train/valid 病人划分必须保持一致。** `prepare_data.py`（图像域）和 `prepare_proj_data.py`（投影域）中定义的 `default_train` / `default_valid` 列表完全相同。添加新数据域时，也必须使用同一份病人名单，确保跨域实验的验证集可比。
 
 ### 4.2 训练
 
@@ -282,6 +288,16 @@ data:
   num_workers: 8              # 数据加载线程（Windows 设为 0）
   shuffle: true               # 是否打乱
 
+  # --- 以下字段仅在 reader: raw 时生效 ---
+  # hu_min: -1000             # HU 归一化下界
+  # hu_max: 1000              # HU 归一化上界
+  #                            # 公式: (x - hu_min) / (hu_max - hu_min) → [0,1]
+
+  # --- 以下字段仅在 reader: proj 时生效 ---
+  # norm_clip_max: 0.28       # 投影数据归一化截断最大值
+  # crop_rows: 8              # 投影域上下裁剪行数，用于去除探测器黑边
+  #                            # crop_rows=8 时 (128,512)→(112,512)，需保证 128-2*crop_rows 是 16 的倍数
+
 model:
   name: DenseUNet2d           # 模型：DenseUNet2d | UNet2d | UNet2dDeepSuperviser
   in_chl: 1                   # 输入通道数
@@ -382,6 +398,7 @@ training:
 - **多 GPU 训练**：`CUDA_VISIBLE_DEVICES=0,1,2,3 python train.py -c <config>`（自动 DataParallel）
 - **数据量太大？** `prepare_data.py` 中 `--num-slices` 减半（如 79），或 `--slice-start` 改为 0 并 `--num-slices 80`（取前 80 张）
 - **Windows 用户注意**：所有 YAML 中 `num_workers` 必须设为 0
+- **投影域黑边裁剪**：如果投影数据上下存在黑边，在 YAML 中设置 `data.crop_rows: 8`（上下各裁 8 行 → 112），训练和测试会自动同步裁剪。先用 `crop_proj_raw.py --info` 确认黑边宽度再设这个值
 
 ---
 

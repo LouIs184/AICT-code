@@ -36,6 +36,9 @@ class DataConfig:
     valid_batch_size: int = 1
     num_workers: int = 8
     norm_clip_max: float = 0.28             # used by proj_reader
+    hu_min: float = -1000.0                 # used by raw_reader: HU 归一化下界
+    hu_max: float = 1000.0                  # used by raw_reader: HU 归一化上界
+    crop_rows: int = 0                      # 投影域上下裁剪行数 (0=不裁剪, 8→112, 10→108)
     shuffle: bool = True
 
 

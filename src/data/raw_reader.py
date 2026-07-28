@@ -23,7 +23,7 @@ class raw_reader(Dataset):
     where input_path / label_path point to .raw files of shape (160, 512, 512).
     """
 
-    def __init__(self, paired_img_txt):
+    def __init__(self, paired_img_txt, hu_min=-1000.0, hu_max=1000.0):
         super().__init__()
         try:
             with open(paired_img_txt, encoding="utf-8") as f:
@@ -31,6 +31,8 @@ class raw_reader(Dataset):
         except UnicodeDecodeError:
             with open(paired_img_txt, encoding=locale.getpreferredencoding()) as f:
                 self.paired_files = f.readlines()
+        self.hu_min = hu_min
+        self.hu_range = hu_max - hu_min
 
     def __len__(self):
         return len(self.paired_files)
@@ -47,9 +49,9 @@ class raw_reader(Dataset):
         input_slice = input_data[slice_idx].astype(np.float32)
         label_slice = label_data[slice_idx].astype(np.float32)
 
-        # HU normalization: [-1000, 1000] → [0, 1]
-        input_slice = (input_slice + 1000) / 2000
-        label_slice = (label_slice + 1000) / 2000
+        # HU normalization: [hu_min, hu_max] → [0, 1]
+        input_slice = (input_slice - self.hu_min) / self.hu_range
+        label_slice = (label_slice - self.hu_min) / self.hu_range
 
         # Clip outliers
         input_slice = np.clip(input_slice, 0, 1)
