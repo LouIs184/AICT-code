@@ -163,6 +163,25 @@ python prepare_proj_data.py --data-dir /path/to/UIH_data --output ./
 
 > ⚠️ **重要：所有数据域的 train/valid 病人划分必须保持一致。** `prepare_data.py`（图像域）和 `prepare_proj_data.py`（投影域）中定义的 `default_train` / `default_valid` 列表完全相同。添加新数据域时，也必须使用同一份病人名单，确保跨域实验的验证集可比。
 
+**修改病人名单：**
+
+| 阶段 | 文件 | 位置 |
+|------|------|------|
+| 训练 | `prepare_data.py` | 第 35-51 行 `default_train` / `default_valid` 列表 |
+| 训练 | `prepare_proj_data.py` | 第 35-51 行 `default_train` / `default_valid` 列表 |
+| 测试 | `test.py` | `_infer_phase()` 和 `_infer_proj()` 中的 `default_patients` 列表 |
+
+所有文件的病人名单必须保持同步。也可以用 CLI 参数临时覆盖：
+```bash
+# 训练时指定病人
+python prepare_data.py --data-dir /path/to/data --output ./ \
+    --train-patients "patient_A" "patient_B" \
+    --valid-patients "patient_C" "patient_D"
+
+# 测试时指定病人
+python test.py ... --patient "patient_A" "patient_B"
+```
+
 ### 4.2 训练
 
 ```bash
@@ -236,6 +255,7 @@ tensorboard --logdir ./runs
 
 ### 4.4 测试（推理）
 
+**Linux / macOS（bash）：**
 ```bash
 # PhaseCT 推理
 python test.py --config experiments/denseunet_phasect.yaml \
@@ -247,8 +267,42 @@ python test.py --config experiments/denseunet_phasect.yaml \
 python test.py --config experiments/denseunet_projct.yaml \
     --checkpoint ./runs/DenseUNet_ProjCT/checkpoints/model_at_epoch_50.dat \
     --data-dir /path/to/data \
-    --output ./results_proj/ \
+    --output ./results/ \
     --domain proj
+```
+
+**Windows（CMD / PowerShell）：**
+```cmd
+:: PhaseCT 推理（CMD 下换行符用 ^，PowerShell 直接写一行或用反引号 `）
+python test.py --config experiments\denseunet_phasect.yaml ^
+    --checkpoint .\runs\DenseUNet_PhaseCT\checkpoints\model_at_epoch_200.dat ^
+    --data-dir D:\path\to\data ^
+    --output .\results\
+
+:: ProjCT 推理
+python test.py --config experiments\denseunet_projct.yaml ^
+    --checkpoint .\runs\DenseUNet_ProjCT\checkpoints\model_at_epoch_50.dat ^
+    --data-dir D:\path\to\data ^
+    --output .\results\ ^
+    --domain proj
+```
+
+> PowerShell 换行用反引号 `` ` ``，或者把整条命令写在一行即可。Windows 路径推荐用反斜杠 `\`，正斜杠 `/` 也支持。
+
+输出目录结构：
+```
+./results/
+├── phase/
+│   ├── 17238_33314_960+_AXIAL_CE1_F063Y_20220106_Thick1_Incre1/
+│   │   ├── input.raw          # (158, 512, 512) 去首尾切片后的输入体数据
+│   │   ├── pred.raw           # (158, 512, 512) 模型预测结果
+│   │   └── gt.raw             # (158, 512, 512) Ground Truth
+│   └── 18537_93073_960+_AXIAL_CE0_M067Y_20210430_Thick1_Incre1/
+│       ├── input.raw
+│       ├── pred.raw
+│       └── gt.raw
+└── proj/
+    └── ... (同上，shape 为 (720, 112, 512) 或 (720, 128, 512))
 ```
 
 `test.py` 会自动：
