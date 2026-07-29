@@ -98,7 +98,9 @@ pip install scipy scikit-image opencv-python
 ```
 AICTVer2/
 ├── train.py                       # 训练入口（唯一）
-├── test.py                        # 推理入口（唯一）
+├── test.py                        # 推理入口（验证集）
+├── infer.py                       # 灵活推理入口（任意病人）
+├── patients.yaml                  # 病人列表配置（train/valid 分组）
 ├── prepare_data.py                # 生成图像域数据索引
 ├── prepare_proj_data.py           # 生成投影域数据索引
 ├── src/
@@ -169,7 +171,9 @@ python prepare_proj_data.py --data-dir /path/to/UIH_data --output ./
 |------|------|------|
 | 训练 | `prepare_data.py` | 第 35-51 行 `default_train` / `default_valid` 列表 |
 | 训练 | `prepare_proj_data.py` | 第 35-51 行 `default_train` / `default_valid` 列表 |
-| 测试 | `test.py` | `_infer_phase()` 和 `_infer_proj()` 中的 `default_patients` 列表 |
+| 测试（默认） | `test.py` | `_infer_phase()` 和 `_infer_proj()` 中的 `default_patients` 列表 |
+| 测试（灵活） | `patients.yaml` | `train` / `valid` 分组 |
+| 测试（灵活） | `infer.py` | 通过 `--patient` 参数选择 |
 
 所有文件的病人名单必须保持同步。也可以用 CLI 参数临时覆盖：
 ```bash
@@ -320,7 +324,50 @@ python test.py ... --patient "patient_A" "patient_B"
 python test.py ... --gpu 0
 ```
 
+### 4.5 灵活推理（任意病人）
+
+`test.py` 只推理验证集默认病人。如果想看**训练集**病人的效果，或者需要一次性跑大量病人，用 `infer.py`：
+
+```bash
+# 推理所有训练集病人
+python infer.py --patients-config patients.yaml \
+    --config experiments/denseunet_phasect.yaml \
+    --checkpoint ./runs/DenseUNet_PhaseCT/checkpoints/model_at_epoch_200.dat \
+    --data-dir /path/to/data \
+    --output ./results_infer/ \
+    --domain phase \
+    --patient train
+
+# 推理所有验证集病人（等同于 test.py）
+python infer.py ... --patient valid
+
+# 推理所有病人（训练 + 验证）
+python infer.py ... --patient all
+
+# 推理单个或几个病人
+python infer.py ... --patient "patient_A" "patient_B"
+
+# 投影域
+python infer.py ... --domain proj --patient all
+```
+
+`infer.py` 的指标计算和文件保存逻辑与 `test.py` 完全一致。病人列表统一写在 `patients.yaml` 中：
+
+```yaml
+# patients.yaml
+train:
+  - "11034_307811_960+_AXIAL_CE1_M067Y_20211215_Thick1_Incre1"
+  - ...
+valid:
+  - "17238_33314_960+_AXIAL_CE1_F063Y_20220106_Thick1_Incre1"
+  - ...
+```
+
+> 修改病人名单时，除了更新 `patients.yaml`，还要同步更新 `prepare_data.py` 和 `prepare_proj_data.py` 中的 `default_train` / `default_valid`，所有地方保持一致。
+
 ---
+
+
 
 ## 5. 配置详解
 
@@ -439,6 +486,7 @@ training:
 | 监控 | `tensorboard --logdir ./runs` |
 | PhaseCT 推理 | `python test.py -c <config> --checkpoint <ckpt> --data-dir <path>` |
 | ProjCT 推理 | `python test.py -c <config> --checkpoint <ckpt> --data-dir <path> --domain proj` |
+| 灵活推理（任意病人） | `python infer.py --patients-config patients.yaml -c <config> --checkpoint <ckpt> --data-dir <path> --patient train\|valid\|all` |
 
 ---
 

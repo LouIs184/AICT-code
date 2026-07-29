@@ -4,6 +4,7 @@
 /runs/
 /results/
 /results_proj/
+/results_infer/
 
 # Data indices (contain absolute paths)
 train_img.txt
