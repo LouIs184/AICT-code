@@ -220,10 +220,7 @@ class Trainer:
     def _build_writer(self):
         tc = self.cfg.training
         self.log_dir = os.path.join(tc.log_dir, self.cfg.experiment.name)
-        if os.path.exists(tc.save_dir):
-            self.save_dir = tc.save_dir
-        else:
-            self.save_dir = os.path.join(tc.save_dir, self.cfg.experiment.name, "checkpoints")
+        self.save_dir = os.path.join(tc.save_dir, "checkpoints")
 
         now = datetime.now().strftime("%m-%d_%H-%M-%S")
         self.log_dir = os.path.join(tc.log_dir, self.cfg.experiment.name, now)
