@@ -25,7 +25,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from datetime import datetime
 
-from src.config import Config
+from src.config import Config, save_config
 from src.models import UNet2d, UNet2dDeepSuperviser, DenseUNet2d, Discriminator2D
 from src.losses import CharbonnierLoss, SSIM, vgg_feature_extractor, vgg_loss_calc, TVLoss, FocalMSE
 from src.data import raw_reader, dicom_reader, proj_reader
@@ -233,6 +233,12 @@ class Trainer:
         self.log_dir = os.path.join(tc.log_dir, self.cfg.experiment.name, now)
         os.makedirs(self.log_dir, exist_ok=True)
         self.writer = SummaryWriter(log_dir=self.log_dir)
+
+        # 保存本次训练生效的完整配置（含 CLI 覆盖），便于回溯。
+        # log_dir 下按时间戳隔离，不会被后续训练覆盖；save_dir 下是最近一次运行的配置。
+        save_config(self.cfg, os.path.join(self.log_dir, "config.yaml"))
+        os.makedirs(self.save_dir, exist_ok=True)
+        save_config(self.cfg, os.path.join(self.save_dir, "config.yaml"))
 
         if self.verbose:
             print(f"Logging to: {self.log_dir}")
