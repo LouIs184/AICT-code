@@ -1,6 +1,7 @@
 from .regularizers import CharbonnierLoss, TVLoss, tv_loss
 from .perceptual import vgg_feature_extractor, vgg_loss_calc
 from .ssim import SSIM, ssim
+from .hard import FocalMSE
 
 __all__ = [
     "CharbonnierLoss",
@@ -10,4 +11,5 @@ __all__ = [
     "vgg_loss_calc",
     "SSIM",
     "ssim",
+    "FocalMSE",
 ]

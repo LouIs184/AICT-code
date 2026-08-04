@@ -328,6 +328,7 @@ python test.py ... --gpu 0
 
 `test.py` 只推理验证集默认病人。如果想看**训练集**病人的效果，或者需要一次性跑大量病人，用 `infer.py`：
 
+**Linux / macOS（bash）：**
 ```bash
 # 推理所有训练集病人
 python infer.py --patients-config patients.yaml \
@@ -350,6 +351,32 @@ python infer.py ... --patient "patient_A" "patient_B"
 # 投影域
 python infer.py ... --domain proj --patient all
 ```
+
+**Windows（CMD / PowerShell）：**
+```cmd
+:: 推理所有训练集病人（CMD 下换行符用 ^，PowerShell 直接写一行或用反引号 `）
+python infer.py --patients-config patients.yaml ^
+    --config experiments\denseunet_phasect.yaml ^
+    --checkpoint .\runs\DenseUNet_PhaseCT\checkpoints\model_at_epoch_200.dat ^
+    --data-dir D:\path\to\data ^
+    --output .\results_infer\ ^
+    --domain phase ^
+    --patient train
+
+:: 推理所有验证集病人（等同于 test.py）
+python infer.py ... --patient valid
+
+:: 推理所有病人（训练 + 验证）
+python infer.py ... --patient all
+
+:: 推理单个或几个病人
+python infer.py ... --patient "patient_A" "patient_B"
+
+:: 投影域
+python infer.py ... --domain proj --patient all
+```
+
+> PowerShell 换行用反引号 `` ` ``，或者把整条命令写在一行即可。Windows 路径推荐用反斜杠 `\`，正斜杠 `/` 也支持。
 
 `infer.py` 的指标计算和文件保存逻辑与 `test.py` 完全一致。病人列表统一写在 `patients.yaml` 中：
 

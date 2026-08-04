@@ -13,7 +13,7 @@ data:
   num_workers: 8
   shuffle: true
   norm_clip_max: 0.28
-  crop_rows: 8
+  crop_rows: 16
 
 model:
   name: DenseUNet2d
@@ -22,12 +22,18 @@ model:
   model_chl: 32
 
 loss:
-  mse_weight: 1.0
+  # mse_weight: 1.0
+  mse_weight: 0.5
   charbonnier_weight: 0.0
   ssim_weight: 0.0
   vgg_weight: 0.0
   adv_weight: 0.0
   tv_weight: 0.0
+  # 添加FocalMSE
+  hard_weight: 1.0
+  hard_gamma: 0.5
+  hard_wmax: 20.0 
+  hard_ema_decay: 0.0
 
 optimizer:
   name: Adam

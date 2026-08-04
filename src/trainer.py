@@ -27,7 +27,7 @@ from datetime import datetime
 
 from src.config import Config
 from src.models import UNet2d, UNet2dDeepSuperviser, DenseUNet2d, Discriminator2D
-from src.losses import CharbonnierLoss, SSIM, vgg_feature_extractor, vgg_loss_calc, TVLoss
+from src.losses import CharbonnierLoss, SSIM, vgg_feature_extractor, vgg_loss_calc, TVLoss, FocalMSE
 from src.data import raw_reader, dicom_reader, proj_reader
 from src.utils.metrics import AverageMeter, normalization
 from src.utils.io_utils import save_model, load_model_model_parallel, find_lastest_file
@@ -197,6 +197,13 @@ class Trainer:
         self.criterion_ssim = SSIM()
         self.criterion_tv = TVLoss()
 
+        # 自适应焦点权重（4.3），hard_weight>0 时启用
+        self.criterion_focal = None
+        if lc.hard_weight > 0:
+            self.criterion_focal = FocalMSE(
+                gamma=lc.hard_gamma, wmax=lc.hard_wmax, ema_decay=lc.hard_ema_decay
+            ).to(self.device)
+
     def _build_optimizers(self):
         self.optimizer = _build_optimizer(self.model, self.cfg)
 
@@ -273,6 +280,12 @@ class Trainer:
             losses["vgg"] = l_vgg
             loss += lc.vgg_weight * l_vgg
 
+        # 自适应焦点权重（4.3）：当前误差大的像素更值钱
+        if lc.hard_weight > 0 and self.criterion_focal is not None:
+            l_focal = self.criterion_focal(predict, target)
+            losses["focal"] = l_focal
+            loss += lc.hard_weight * l_focal
+
         return loss, losses
 
     # ------------------------------------------------------------------
@@ -288,7 +301,7 @@ class Trainer:
             self.discriminator.train()
 
         batch_time = AverageMeter()
-        loss_mse_scalar = AverageMeter()
+        loss_meters = {}                # 每个损失分项一个 meter（mse/focal/...）
         end = time.time()
 
         pbar = tqdm(self.train_loader, desc=f"Train Epoch {epoch + 1}",
@@ -304,24 +317,35 @@ class Trainer:
 
             if self.discriminator is not None and self.optimizer_d is not None:
                 # ======== GAN training ========
-                self._train_gan_step(ldct, rdct, loss_mse_scalar, pbar, step, epoch)
+                self._train_gan_step(ldct, rdct, loss_meters, pbar, step, epoch)
             else:
                 # ======== Standard training ========
-                self._train_standard_step(ldct, rdct, loss_mse_scalar, pbar, step, epoch)
+                self._train_standard_step(ldct, rdct, loss_meters, pbar, step, epoch)
 
             batch_time.update(time.time() - end)
             end = time.time()
 
-        # Epoch-end logging
-        self.writer.add_scalar("loss/train_mse", loss_mse_scalar.avg, epoch + 1)
+        # Epoch-end logging：每个损失分项都记一条标量（mse/focal/charbonnier/...）
+        for name, meter in loss_meters.items():
+            self.writer.add_scalar(f"loss/train_{name}", meter.avg, epoch + 1)
         self.scheduler.step()
         if self.scheduler_d is not None:
             self.scheduler_d.step()
 
         if self.verbose:
-            print(f"Train Epoch {epoch + 1}: MSE {loss_mse_scalar.avg:.6f}")
+            parts = [f"{name.upper()} {meter.avg:.6f}"
+                     for name, meter in loss_meters.items()]
+            print(f"Train Epoch {epoch + 1}: " + "  ".join(parts))
 
-    def _train_standard_step(self, ldct, rdct, loss_meter, pbar, step, epoch):
+    @staticmethod
+    def _update_loss_meters(loss_meters, loss_dict, n):
+        """把 loss_dict 里的每个分项累积进对应的 AverageMeter。"""
+        for name, val in loss_dict.items():
+            if name not in loss_meters:
+                loss_meters[name] = AverageMeter()
+            loss_meters[name].update(val.item(), n)
+
+    def _train_standard_step(self, ldct, rdct, loss_meters, pbar, step, epoch):
         cfg = self.cfg
         model = self.model
 
@@ -349,7 +373,7 @@ class Trainer:
         loss.backward()
         self.optimizer.step()
 
-        loss_meter.update(loss_dict.get("mse", loss).item(), ldct.size(0))
+        self._update_loss_meters(loss_meters, loss_dict, ldct.size(0))
         self.global_step += 1
 
         if step % cfg.training.log_interval == 0:
@@ -359,7 +383,7 @@ class Trainer:
         if step == 0 and (cfg.training.viz_interval > 0):
             self._log_images("train", ldct, rdct, predict[-1] if isinstance(predict, tuple) else predict, epoch)
 
-    def _train_gan_step(self, ldct, rdct, loss_meter, pbar, step, epoch):
+    def _train_gan_step(self, ldct, rdct, loss_meters, pbar, step, epoch):
         from src.models.discriminator import compute_gradient_penalty
         from src.utils import extract_patches_online
         cfg = self.cfg
@@ -397,7 +421,7 @@ class Trainer:
         g_loss.backward()
         self.optimizer.step()
 
-        loss_meter.update(loss_dict.get("mse", g_loss).item(), ldct.size(0))
+        self._update_loss_meters(loss_meters, loss_dict, ldct.size(0))
         self.global_step += 1
 
         if step % cfg.training.log_interval == 0:

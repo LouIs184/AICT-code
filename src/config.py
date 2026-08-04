@@ -63,6 +63,12 @@ class LossConfig:
     deep_supervision: bool = False         # multi-scale supervision for UNet2dDeepSuperviser
     charbonnier_eps: float = 1e-3
 
+    # ---- 自适应焦点权重 FocalMSE（见 docs/只学习简单像素矫正/HARD_REGION_OPTIMIZATION_GUIDE.md 4.3）----
+    hard_weight: float = 0.0        # >0 时启用 FocalMSE（与 mse_weight 组合）
+    hard_gamma: float = 1.0         # focal 指数，建议 0.5 起步，范围 0.25 ~ 2.0
+    hard_wmax: float = 20.0         # 权重上限（相对均值倍数），范围 10 ~ 50
+    hard_ema_decay: float = 0.0     # 误差图 EMA 平滑系数（0=不使用，0.9 左右抑制帧间抖动）
+
 
 @dataclass
 class OptimizerConfig:
