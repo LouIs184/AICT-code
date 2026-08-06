@@ -69,6 +69,14 @@ class LossConfig:
     hard_wmax: float = 20.0         # 权重上限（相对均值倍数），范围 10 ~ 50
     hard_ema_decay: float = 0.0     # 误差图 EMA 平滑系数（0=不使用，0.9 左右抑制帧间抖动）
 
+    # ---- Focal Frequency Loss（FFL，ICCV 2021，见 src/losses/focal_frequency.py）----
+    ffl_weight: float = 0.0         # >0 时启用 FFL（与 mse_weight 组合，频域互补）
+    ffl_alpha: float = 1.0          # 频谱权重矩阵缩放指数 alpha
+    ffl_patch_factor: int = 1       # 图像切块因子（1=不切块，>1 为 patch-based FFL）
+    ffl_ave_spectrum: bool = False  # 使用 minibatch 平均频谱
+    ffl_log_matrix: bool = False    # 对频谱权重矩阵取对数调整
+    ffl_batch_matrix: bool = False  # 用 batch 级统计归一化权重矩阵
+
 
 @dataclass
 class OptimizerConfig:

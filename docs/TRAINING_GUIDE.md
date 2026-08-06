@@ -117,7 +117,9 @@ AICTVer2/
 │   ├── losses/                    # 损失函数
 │   │   ├── regularizers.py        # CharbonnierLoss, TVLoss
 │   │   ├── ssim.py                # SSIM 损失/指标
-│   │   └── perceptual.py          # VGG 感知损失
+│   │   ├── perceptual.py          # VGG 感知损失
+│   │   ├── hard.py                # FocalMSE（自适应焦点权重）
+│   │   └── focal_frequency.py     # FocalFrequencyLoss（FFL，ICCV 2021）
 │   ├── utils/
 │   │   ├── io_utils.py            # 模型保存/加载
 │   │   ├── metrics.py             # AverageMeter, normalization, PSNR
@@ -441,6 +443,15 @@ loss:
   adv_weight: 0.0             # 对抗损失权重（>0 自动启用 GAN）
   deep_supervision: false      # 多尺度深度监督
 
+  # --- 焦点损失（可选，默认关闭）---
+  # hard_weight: 0.0          # FocalMSE 权重（>0 启用，自适应焦点像素权重）
+  # hard_gamma: 1.0           # FocalMSE 焦点指数
+  # ffl_weight: 0.0           # Focal Frequency Loss 权重（>0 启用，频域损失）
+  # ffl_alpha: 1.0            # FFL 频谱权重矩阵缩放指数
+  # ffl_patch_factor: 1       # FFL 切块因子（1=不切块，需整除图像高宽）
+  # ffl_log_matrix: false     # FFL 对权重矩阵取对数
+  # ffl_batch_matrix: false   # FFL 用 batch 级统计归一化权重
+
 optimizer:
   name: Adam                  # Adam | AdamW | SophiaG
   lr: 0.0001
@@ -479,6 +490,8 @@ training:
 | VGG | `vgg_weight` | 感知质量优化，高频细节保留 |
 | TV | `tv_weight` | 平滑正则化，抑制噪声 |
 | GAN (Adv) | `adv_weight` | 对抗训练，生成更真实的纹理 |
+| FocalMSE | `hard_weight` | 焦点像素权重，当前误差大的像素更高权（见 `docs/只学习简单像素矫正/FOCAL_LOSS_USAGE.md`） |
+| Focal Frequency | `ffl_weight` | 频域损失（ICCV 2021），聚焦"难"频率分量，高频/伪影区提升（见 `docs/修改日志/4-FOCAL_FREQUENCY_LOSS.md`） |
 
 > 例如 `unet_vgg.yaml`：`mse_weight: 1.0` + `vgg_weight: 0.1`，兼顾 MSE 和感知质量。
 
@@ -523,6 +536,7 @@ training:
 - **显存不够**：`python train.py -c <config> --batch-size 4`；Windows 还需要把 YAML 中的 `num_workers` 改为 0
 - **收敛太慢**：调大 `optimizer.lr`（如 0.0002）或换用 CosineAnnealingLR + 更多 epochs
 - **GAN 训练不稳定**：增大 `gan.gp_weight`（梯度惩罚系数）或调小 `loss.adv_weight`
+- **高频细节/伪影区难提升**：在 YAML 加 `loss.ffl_weight: 1.0`（Focal Frequency Loss，与 MSE 组合，聚焦频域"难"频率）；或用 `loss.hard_weight: 1.0` 开 FocalMSE 焦点像素权重
 - **仅跑验证/调试**：临时改 YAML 中 `training.epochs: 1`，或直接在命令行 `--epochs 1`
 - **多 GPU 训练**：`CUDA_VISIBLE_DEVICES=0,1,2,3 python train.py -c <config>`（自动 DataParallel）
 - **数据量太大？** `prepare_data.py` 中 `--num-slices` 减半（如 79），或 `--slice-start` 改为 0 并 `--num-slices 80`（取前 80 张）

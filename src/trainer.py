@@ -27,7 +27,7 @@ from datetime import datetime
 
 from src.config import Config, save_config
 from src.models import UNet2d, UNet2dDeepSuperviser, DenseUNet2d, Discriminator2D
-from src.losses import CharbonnierLoss, SSIM, vgg_feature_extractor, vgg_loss_calc, TVLoss, FocalMSE
+from src.losses import CharbonnierLoss, SSIM, vgg_feature_extractor, vgg_loss_calc, TVLoss, FocalMSE, FocalFrequencyLoss
 from src.data import raw_reader, dicom_reader, proj_reader
 from src.utils.metrics import AverageMeter, normalization
 from src.utils.io_utils import save_model, load_model_model_parallel, find_lastest_file
@@ -204,6 +204,15 @@ class Trainer:
                 gamma=lc.hard_gamma, wmax=lc.hard_wmax, ema_decay=lc.hard_ema_decay
             ).to(self.device)
 
+        # Focal Frequency Loss（ICCV 2021），ffl_weight>0 时启用
+        self.criterion_ffl = None
+        if lc.ffl_weight > 0:
+            self.criterion_ffl = FocalFrequencyLoss(
+                alpha=lc.ffl_alpha, patch_factor=lc.ffl_patch_factor,
+                ave_spectrum=lc.ffl_ave_spectrum, log_matrix=lc.ffl_log_matrix,
+                batch_matrix=lc.ffl_batch_matrix,
+            ).to(self.device)
+
     def _build_optimizers(self):
         self.optimizer = _build_optimizer(self.model, self.cfg)
 
@@ -291,6 +300,12 @@ class Trainer:
             l_focal = self.criterion_focal(predict, target)
             losses["focal"] = l_focal
             loss += lc.hard_weight * l_focal
+
+        # Focal Frequency Loss（ICCV 2021）：频域误差动态加权，关注"难"频率
+        if lc.ffl_weight > 0 and self.criterion_ffl is not None:
+            l_ffl = self.criterion_ffl(predict, target)
+            losses["ffl"] = l_ffl
+            loss += lc.ffl_weight * l_ffl
 
         return loss, losses
 

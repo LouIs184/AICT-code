@@ -13,7 +13,7 @@ data:
   num_workers: 8
   shuffle: true
   norm_clip_max: 0.28
-  crop_rows: 16
+  crop_rows: 32
 
 model:
   name: DenseUNet2d
@@ -22,18 +22,25 @@ model:
   model_chl: 32
 
 loss:
-  # mse_weight: 1.0
-  mse_weight: 0.5
+  mse_weight: 1.0
+  # mse_weight: 0.5
   charbonnier_weight: 0.0
   ssim_weight: 0.0
   vgg_weight: 0.0
   adv_weight: 0.0
   tv_weight: 0.0
   # 添加FocalMSE
-  hard_weight: 1.0
-  hard_gamma: 0.5
-  hard_wmax: 20.0 
-  hard_ema_decay: 0.0
+  # hard_weight: 1.0
+  # hard_gamma: 0.5
+  # hard_wmax: 20.0
+  # hard_ema_decay: 0.0
+  # 添加Focal Frequency Loss (ICCV 2021)
+  # ffl_weight: 1.0
+  # ffl_alpha: 1.0
+  # ffl_patch_factor: 1
+  # ffl_ave_spectrum: false
+  # ffl_log_matrix: false
+  # ffl_batch_matrix: false
 
 optimizer:
   name: Adam
@@ -49,8 +56,8 @@ scheduler:
 
 training:
   epochs: 200
-  save_dir: ./runs/DenseUNet_ProjCT
-  log_dir: ./runs/DenseUNet_ProjCT
+  save_dir: ./runs/0804-1137-DenseUNet_ProjCT
+  log_dir: ./runs/0804-1137-DenseUNet_ProjCT
   log_interval: 1
   viz_interval: 1
   save_interval: 20
