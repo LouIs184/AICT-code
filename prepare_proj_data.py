@@ -7,12 +7,23 @@ Each line::
 
 Views range from 0 to 719 (720 views total).
 
+The train/valid patient split is read from patients.yaml (--patients-config).
+CLI --train-patients / --valid-patients override it when given.
+
 Usage:
     python prepare_proj_data.py --data-dir /path/to/UIH_data --output ./
+    python prepare_proj_data.py --data-dir /path/to/UIH_data --output ./ \
+        --patients-config my_split.yaml
 """
 
 import argparse
 import os
+import sys
+
+# Ensure the project root is on sys.path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from src.utils.io_utils import load_patients
 
 
 def main():
@@ -21,35 +32,25 @@ def main():
                         help="Root directory containing patient subfolders.")
     parser.add_argument("--output", "-o", type=str, default="./",
                         help="Output directory for .txt files.")
-    parser.add_argument("--train-patients", type=str, nargs="+", default=None)
-    parser.add_argument("--valid-patients", type=str, nargs="+", default=None)
+    parser.add_argument("--patients-config", type=str, default="patients.yaml",
+                        help="YAML file with 'train'/'valid' patient lists. "
+                             "Default: ./patients.yaml")
+    parser.add_argument("--train-patients", type=str, nargs="+", default=None,
+                        help="Override the train patient list (from patients.yaml).")
+    parser.add_argument("--valid-patients", type=str, nargs="+", default=None,
+                        help="Override the valid patient list (from patients.yaml).")
     parser.add_argument("--num-views", type=int, default=720)
 
     args = parser.parse_args()
     os.makedirs(args.output, exist_ok=True)
 
-    # Default split — MUST match prepare_data.py (image domain) exactly.
-    # All domains (PhaseCT, ProjCT, etc.) must use the same patient split.
-    default_train = [
-        "11034_307811_960+_AXIAL_CE1_M067Y_20211215_Thick1_Incre1",
-        "11849_308361_960+_AXIAL_CE1_M044Y_20211216_Thick1_Incre1",
-        "15962_15633_960+_AXIAL_CE1_M034Y_20200601_Thick1_Incre1",
-        "15962_35868_960+_AXIAL_CE1_M034Y_20200601_Thick1_Incre1",
-        "18631_303226_960+_AXIAL_CE1_F058Y_20211216_Thick1_Incre1",
-        "38423_35948_960+_AXIAL_CE1_M049Y_20200601_Thick1_Incre1",
-        "51741_308269_960+_AXIAL_CE1_M048Y_20211215_Thick1_Incre1",
-        "51789_393117_960+_AXIAL_CE1_M074Y_20211215_Thick1_Incre1",
-        "72278_406010_960+_AXIAL_CE1_F071Y_20211216_Thick1_Incre1",
-        "91963_301643_960+_AXIAL_CE1_M070Y_20211216_Thick1_Incre1",
-        "91963_53624_960+_AXIAL_CE1_M070Y_20211216_Thick1_Incre1",
-    ]
-    default_valid = [
-        "17238_33314_960+_AXIAL_CE1_F063Y_20220106_Thick1_Incre1",
-        "18537_93073_960+_AXIAL_CE0_M067Y_20210430_Thick1_Incre1",
-    ]
-
-    train_patients = args.train_patients or default_train
-    valid_patients = args.valid_patients or default_valid
+    # Train/valid split comes from patients.yaml (single source of truth).
+    # All domains (PhaseCT, ProjCT, etc.) use the same split.
+    train_patients, valid_patients = load_patients(args.patients_config)
+    if args.train_patients is not None:
+        train_patients = args.train_patients
+    if args.valid_patients is not None:
+        valid_patients = args.valid_patients
 
     def write_list(filename, patients):
         with open(os.path.join(args.output, filename), "w") as f:

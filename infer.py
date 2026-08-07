@@ -34,7 +34,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 import torch
-import yaml
 from tqdm import tqdm
 
 from src.config import load_config
@@ -48,9 +47,10 @@ MODEL_MAP = {
 
 def load_patients(patients_config_path):
     """Load patient list YAML, return dict with 'train' and 'valid' keys."""
-    with open(patients_config_path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    return data
+    from src.utils.io_utils import load_patients as _load_patients
+
+    train, valid = _load_patients(patients_config_path)
+    return {"train": train, "valid": valid}
 
 
 def resolve_patients(patient_config, patient_arg):

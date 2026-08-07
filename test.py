@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 from src.config import load_config
 from src.models import DenseUNet2d, UNet2d
-from src.utils.io_utils import load_model
+from src.utils.io_utils import load_model, load_patients
 
 MODEL_MAP = {
     "DenseUNet2d": DenseUNet2d,
@@ -42,7 +42,11 @@ def main():
     parser.add_argument("--output", "-o", type=str, default="./results/",
                         help="Output directory for predictions.")
     parser.add_argument("--patient", type=str, nargs="+", default=None,
-                        help="Patient folder name(s). If omitted, use defaults.")
+                        help="Patient folder name(s). If omitted, use the 'valid' "
+                             "list from patients.yaml.")
+    parser.add_argument("--patients-config", type=str, default="patients.yaml",
+                        help="YAML file with 'train'/'valid' patient lists. "
+                             "Default: ./patients.yaml")
     parser.add_argument("--domain", type=str, choices=["phase", "proj"], default="phase",
                         help="Domain: 'phase' (image) or 'proj' (projection).")
     parser.add_argument("--gpu", type=str, default="0",
@@ -51,6 +55,14 @@ def main():
     args = parser.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     os.makedirs(args.output, exist_ok=True)
+
+    # Resolve patients: --patient wins, else default to the 'valid' split from
+    # patients.yaml (single source of truth for the train/test split).
+    if args.patient is not None:
+        patients = args.patient
+    else:
+        _, patients = load_patients(args.patients_config)
+    args.patients = patients
 
     # Load config for model parameters
     cfg = load_config(args.config)
@@ -95,11 +107,7 @@ def _infer_phase(args, model):
     hu_min = getattr(cfg.data, "hu_min", -1000.0)
     hu_range = getattr(cfg.data, "hu_max", 1000.0) - hu_min
 
-    default_patients = [
-        "17238_33314_960+_AXIAL_CE1_F063Y_20220106_Thick1_Incre1",
-        "18537_93073_960+_AXIAL_CE0_M067Y_20210430_Thick1_Incre1",
-    ]
-    patients = args.patient or default_patients
+    patients = args.patients
 
     for patient in patients:
         print(f"\nTesting {patient} ...")
@@ -146,11 +154,7 @@ def _infer_phase(args, model):
 
 def _infer_proj(args, model):
     """Projection-domain inference (ProjCT): process (720, 128, 512) volumes."""
-    default_patients = [
-        "17238_33314_960+_AXIAL_CE1_F063Y_20220106_Thick1_Incre1",
-        "18537_93073_960+_AXIAL_CE0_M067Y_20210430_Thick1_Incre1",
-    ]
-    patients = args.patient or default_patients
+    patients = args.patients
 
     # Read config params (must match training)
     from src.config import load_config

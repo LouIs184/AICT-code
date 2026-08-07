@@ -1,5 +1,5 @@
 """
-Model checkpoint save / load utilities.
+Model checkpoint save / load utilities, plus the patient split loader.
 
 Consolidates the original load_model / save_model variants from the AICT project.
 """
@@ -51,3 +51,30 @@ def find_lastest_file(file_dir):
     files = os.listdir(file_dir)
     files.sort(key=lambda x: os.path.getmtime(os.path.join(file_dir, x)))
     return os.path.join(file_dir, files[-1])
+
+
+def load_patients(patients_config_path):
+    """Load the train/valid patient split from a YAML file.
+
+    Returns ``(train_list, valid_list)``. This is the single source of truth for
+    the train/test split — used by prepare_data.py / prepare_proj_data.py (to
+    generate the .txt index files) and by test.py / infer.py.
+    """
+    import yaml
+
+    if not os.path.exists(patients_config_path):
+        raise FileNotFoundError(
+            f"Patient config not found: {patients_config_path}\n"
+            "Expected a YAML file with 'train' and 'valid' patient lists "
+            "(see patients.yaml)."
+        )
+    with open(patients_config_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    train = [p for p in data.get("train", []) if p]
+    valid = [p for p in data.get("valid", []) if p]
+    if not train and not valid:
+        raise ValueError(
+            f"No 'train'/'valid' patient lists found in {patients_config_path}"
+        )
+    return train, valid
