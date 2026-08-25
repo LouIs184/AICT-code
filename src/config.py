@@ -49,6 +49,7 @@ class ModelConfig:
     in_chl: int = 1
     out_chl: int = 1
     model_chl: int = 32
+    artifact_output: bool = False   # true: 输出 (clean, artifact)，clean = x - artifact（恒等起点）
 
 
 @dataclass
@@ -58,7 +59,7 @@ class LossConfig:
     charbonnier_weight: float = 0.0
     ssim_weight: float = 0.0
     vgg_weight: float = 0.0
-    adv_weight: float = 0.01               # GAN adversarial loss weight (for generator)
+    adv_weight: float = 0.0                # GAN adversarial loss weight (>0 开启 GAN；默认关，需显式开启)
     tv_weight: float = 0.0
     deep_supervision: bool = False         # multi-scale supervision for UNet2dDeepSuperviser
     charbonnier_eps: float = 1e-3
@@ -76,6 +77,13 @@ class LossConfig:
     ffl_ave_spectrum: bool = False  # 使用 minibatch 平均频谱
     ffl_log_matrix: bool = False    # 对频谱权重矩阵取对数调整
     ffl_batch_matrix: bool = False  # 用 batch 级统计归一化权重矩阵
+
+    # ---- TMCode PBI 去伪影复合损失（移植自 TMCode/train_fbpconvnet_sino.py）----
+    l1_weight: float = 0.0          # 干净图 L1 权重（同学用 0.3）
+    artifact_weight: float = 0.0    # 伪影残差 L1 权重（需 model.artifact_output=true，同学用 0.1）
+    fft_amp_weight: float = 0.0     # FFT 幅值 L1 权重（同学用 0.8）
+    angular_weight: float = 0.0     # 沿末维梯度 L1 权重（同学用 0.8）
+    sobel_weight: float = 0.0       # 多向 Sobel 梯度 L1 权重（同学用 0.3）
 
 
 @dataclass

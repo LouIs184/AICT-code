@@ -3,6 +3,7 @@ from .perceptual import vgg_feature_extractor, vgg_loss_calc
 from .ssim import SSIM, ssim
 from .hard import FocalMSE
 from .focal_frequency import FocalFrequencyLoss
+from .sino import MultiDirectionalSobelLoss, FFTAmplitudeLoss, AngularGradLoss
 
 __all__ = [
     "CharbonnierLoss",
@@ -14,4 +15,7 @@ __all__ = [
     "ssim",
     "FocalMSE",
     "FocalFrequencyLoss",
+    "MultiDirectionalSobelLoss",
+    "FFTAmplitudeLoss",
+    "AngularGradLoss",
 ]

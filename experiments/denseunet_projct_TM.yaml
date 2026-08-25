@@ -1,0 +1,53 @@
+# DenseUNet2d — ProjCT + TMCode PBI 去伪影（伪影残差输出 + 复合损失）
+experiment:
+  name: DenseUNet_ProjCT_TM
+  seed: 1234
+
+data:
+  reader: proj
+  train_txt: ./train_proj_img.txt
+  valid_txt: ./valid_proj_img.txt
+  batch_size: 36
+  valid_batch_size: 1
+  num_workers: 8
+  shuffle: true
+  norm_clip_max: 0.28
+  crop_rows: 16
+
+model:
+  name: DenseUNet2d
+  in_chl: 1
+  out_chl: 1
+  model_chl: 32
+  artifact_output: true            # 关键：伪影残差输出 + 恒等起点
+
+loss:
+  mse_weight: 0.0                  # 换用同学的复合损失
+  adv_weight: 0.0                  # 关 GAN（默认 0.0；>0 会走 GAN 分支，与 artifact_output 冲突）
+  l1_weight: 0.3                   # L1
+  artifact_weight: 0.1             # 伪影残差 L1
+  ssim_weight: 0.8                 # 1 - SSIM
+  fft_amp_weight: 0.8              # FFT 幅值
+  angular_weight: 0.8              # 沿末维梯度
+  sobel_weight: 0.3                # 多向 Sobel
+  # charbonnier / vgg / tv / focal / ffl 保持 0
+
+optimizer:
+  name: Adam
+  lr: 0.0001
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+  weight_decay: 0.0
+
+scheduler:
+  name: StepLR
+  step_size: 2
+  gamma: 0.95
+
+training:
+  epochs: 200
+  save_dir: ./runs/2026-0818-DenseUNet_ProjCT_TM
+  log_dir: ./runs/2026-0818-DenseUNet_ProjCT_TM
+  log_interval: 1
+  viz_interval: 1
+  save_interval: 20

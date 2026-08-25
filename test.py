@@ -70,7 +70,8 @@ def main():
 
     # Build model
     model_cls = MODEL_MAP.get(mc.name, DenseUNet2d)
-    model = model_cls(in_chl=mc.in_chl, out_chl=mc.out_chl, model_chl=mc.model_chl)
+    model = model_cls(in_chl=mc.in_chl, out_chl=mc.out_chl, model_chl=mc.model_chl,
+                      artifact_output=mc.artifact_output)
     model = load_model(model, torch.load(args.checkpoint, map_location="cpu"))
     model = model.cuda()
     model.eval()
@@ -134,6 +135,8 @@ def _infer_phase(args, model):
             t = torch.FloatTensor(s[np.newaxis, np.newaxis, ...]).cuda()
             with torch.no_grad():
                 p = model(t)
+            if isinstance(p, (tuple, list)):
+                p = p[0]   # artifact_output 模型返回 (clean, artifact)，取 clean
             p = np.squeeze(p.cpu().numpy()) * hu_range + hu_min  # denormalize back to HU
             preds.append(p)
 
@@ -191,6 +194,8 @@ def _infer_proj(args, model):
             t = torch.FloatTensor(s[np.newaxis, np.newaxis, ...]).cuda()
             with torch.no_grad():
                 p = model(t)
+            if isinstance(p, (tuple, list)):
+                p = p[0]   # artifact_output 模型返回 (clean, artifact)，取 clean
             pred = np.squeeze(p.cpu().numpy()) * norm_clip_max
             preds.append(pred)
 

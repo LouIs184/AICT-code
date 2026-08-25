@@ -38,3 +38,7 @@ Thumbs.db
 .env
 venv/
 .venv/
+
+# Other Code
+TMCode/
+AICT/

@@ -28,6 +28,7 @@ from datetime import datetime
 from src.config import Config, save_config
 from src.models import UNet2d, UNet2dDeepSuperviser, DenseUNet2d, Discriminator2D
 from src.losses import CharbonnierLoss, SSIM, vgg_feature_extractor, vgg_loss_calc, TVLoss, FocalMSE, FocalFrequencyLoss
+from src.losses import MultiDirectionalSobelLoss, FFTAmplitudeLoss, AngularGradLoss
 from src.data import raw_reader, dicom_reader, proj_reader
 from src.utils.metrics import AverageMeter, normalization
 from src.utils.io_utils import save_model, load_model_model_parallel, find_lastest_file
@@ -177,13 +178,20 @@ class Trainer:
         if model_cls is None:
             raise ValueError(f"Unknown model: {mc.name} (available: {list(MODEL_MAP.keys())})")
 
-        model = model_cls(in_chl=mc.in_chl, out_chl=mc.out_chl, model_chl=mc.model_chl)
+        model = model_cls(in_chl=mc.in_chl, out_chl=mc.out_chl, model_chl=mc.model_chl,
+                          artifact_output=mc.artifact_output)
 
         # Multi-GPU
         if torch.cuda.is_available() and torch.cuda.device_count() > 1:
             model = nn.DataParallel(model)
         model = model.to(self.device)
         self.model = model
+
+        # GAN 与伪影残差输出不兼容，提前报错（避免 _train_gan_step 里晦涩的 tuple 崩溃）
+        if mc.artifact_output and self.cfg.loss.adv_weight > 0:
+            raise ValueError(
+                "artifact_output=True 时不支持 GAN（adv_weight>0）。请在 yaml 的 loss: 段设置 adv_weight: 0.0"
+            )
 
         # GAN discriminator
         self.discriminator = None
@@ -193,9 +201,13 @@ class Trainer:
     def _build_losses(self):
         lc = self.cfg.loss
         self.criterion_mse = nn.MSELoss()
+        self.criterion_l1 = nn.L1Loss()
         self.criterion_charbonnier = CharbonnierLoss(eps=lc.charbonnier_eps)
         self.criterion_ssim = SSIM()
         self.criterion_tv = TVLoss()
+        self.criterion_fft_amp = FFTAmplitudeLoss().to(self.device)
+        self.criterion_angular = AngularGradLoss().to(self.device)
+        self.criterion_sobel = MultiDirectionalSobelLoss().to(self.device)
 
         # 自适应焦点权重（4.3），hard_weight>0 时启用
         self.criterion_focal = None
@@ -263,7 +275,7 @@ class Trainer:
     # Loss computation
     # ------------------------------------------------------------------
 
-    def _compute_loss(self, predict, target, model_out=None):
+    def _compute_loss(self, predict, target, pred_artifact=None, gt_artifact=None):
         """Compute combined loss from configured weights."""
         lc = self.cfg.loss
         loss = 0.0
@@ -274,13 +286,39 @@ class Trainer:
             losses["mse"] = l_mse
             loss += lc.mse_weight * l_mse
 
+        # ---- TMCode 移植：L1 / 伪影残差 L1 / FFT 幅值 / 角度梯度 / 多向 Sobel ----
+        if lc.l1_weight > 0:
+            l_l1 = self.criterion_l1(predict, target)
+            losses["l1"] = l_l1
+            loss += lc.l1_weight * l_l1
+
+        if lc.artifact_weight > 0 and pred_artifact is not None and gt_artifact is not None:
+            l_art = self.criterion_l1(pred_artifact, gt_artifact)
+            losses["artifact"] = l_art
+            loss += lc.artifact_weight * l_art
+
+        if lc.fft_amp_weight > 0:
+            l_fft = self.criterion_fft_amp(predict, target)
+            losses["fft_amp"] = l_fft
+            loss += lc.fft_amp_weight * l_fft
+
+        if lc.angular_weight > 0:
+            l_ang = self.criterion_angular(predict, target)
+            losses["angular"] = l_ang
+            loss += lc.angular_weight * l_ang
+
+        if lc.sobel_weight > 0:
+            l_sob = self.criterion_sobel(predict, target)
+            losses["sobel"] = l_sob
+            loss += lc.sobel_weight * l_sob
+
         if lc.charbonnier_weight > 0:
             l_cl = self.criterion_charbonnier(predict, target)
             losses["charbonnier"] = l_cl
             loss += lc.charbonnier_weight * l_cl
 
         if lc.ssim_weight > 0:
-            l_ssim = 1 - self.criterion_ssim(predict, target)
+            l_ssim = 1 - self.criterion_ssim(predict.clamp(0, 1), target)
             losses["ssim"] = l_ssim
             loss += lc.ssim_weight * l_ssim
 
@@ -370,25 +408,36 @@ class Trainer:
         cfg = self.cfg
         model = self.model
 
-        predict = model(ldct)
+        model_out = model(ldct)
+        predict_for_viz = model_out
 
-        if cfg.loss.deep_supervision and isinstance(predict, (tuple, list)):
+        if cfg.model.artifact_output and isinstance(model_out, tuple):
+            # 伪影残差输出：(clean, artifact)；真实伪影 = 输入 - 干净GT
+            pred_clean, pred_artifact = model_out
+            gt_artifact = ldct - rdct
+            loss, loss_dict = self._compute_loss(
+                pred_clean, rdct, pred_artifact=pred_artifact, gt_artifact=gt_artifact)
+            predict_for_viz = pred_clean
+
+        elif cfg.loss.deep_supervision and isinstance(model_out, (tuple, list)):
             # Deep supervision: multiple outputs
-            # predict = (conv5, up4, up3, up2, final)
-            final_out = predict[-1]
+            # model_out = (conv5, up4, up3, up2, final)
+            final_out = model_out[-1]
             loss, loss_dict = self._compute_loss(final_out, rdct)
 
             # Add multi-scale losses from intermediate outputs
             lc = cfg.loss
-            for idx, out in enumerate(predict[:-1]):
+            for idx, out in enumerate(model_out[:-1]):
                 # Resize target to match intermediate output size
                 target_resized = nn.functional.interpolate(
                     rdct, size=out.shape[2:], mode="bilinear", align_corners=False
                 )
                 if lc.mse_weight > 0:
                     loss += lc.mse_weight * self.criterion_mse(out, target_resized) * 0.1
+            predict_for_viz = final_out
+
         else:
-            loss, loss_dict = self._compute_loss(predict, rdct)
+            loss, loss_dict = self._compute_loss(model_out, rdct)
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -402,7 +451,7 @@ class Trainer:
 
         # Image logging at first step of epoch
         if step == 0 and (cfg.training.viz_interval > 0):
-            self._log_images("train", ldct, rdct, predict[-1] if isinstance(predict, tuple) else predict, epoch)
+            self._log_images("train", ldct, rdct, predict_for_viz, epoch)
 
     def _train_gan_step(self, ldct, rdct, loss_meters, pbar, step, epoch):
         from src.models.discriminator import compute_gradient_penalty
@@ -468,8 +517,10 @@ class Trainer:
             rdct = data["rdct"].to(self.device, non_blocking=True)
 
             predict = model(ldct)
-            if isinstance(predict, (tuple, list)):
-                predict = predict[-1]
+            if self.cfg.model.artifact_output and isinstance(predict, (tuple, list)):
+                predict = predict[0]      # artifact_output 时第一个输出是 clean
+            elif isinstance(predict, (tuple, list)):
+                predict = predict[-1]     # deep supervision 时最后一个输出
 
             l_mse = self.criterion_mse(predict, rdct)
             l_ssim = self.criterion_ssim(predict, rdct)

@@ -21,11 +21,12 @@ from .blocks import (
 class UNet2d(nn.Module):
     """Standard U-Net with residual output."""
 
-    def __init__(self, in_chl=1, out_chl=1, model_chl=32):
+    def __init__(self, in_chl=1, out_chl=1, model_chl=32, artifact_output=False):
         super().__init__()
         self.in_chl = in_chl
         self.out_chl = out_chl
         self.model_chl = model_chl
+        self.artifact_output = artifact_output
 
         self.begin = nn.Sequential(
             ConvBnRelu2d(in_chl, model_chl, kernel_size=3, stride=1, is_bn=False)
@@ -73,11 +74,12 @@ class UNet2dDeepSuperviser(nn.Module):
     where each intermediate output can be supervised separately.
     """
 
-    def __init__(self, in_chl=1, out_chl=1, model_chl=32):
+    def __init__(self, in_chl=1, out_chl=1, model_chl=32, artifact_output=False):
         super().__init__()
         self.in_chl = in_chl
         self.out_chl = out_chl
         self.model_chl = model_chl
+        self.artifact_output = artifact_output
 
         self.begin = nn.Sequential(
             ConvBnRelu2d(in_chl, model_chl, kernel_size=3, stride=1, is_bn=False)
@@ -125,11 +127,12 @@ class DenseUNet2d(nn.Module):
     This is the primary model used in the original AICT project.
     """
 
-    def __init__(self, in_chl=1, out_chl=1, model_chl=32):
+    def __init__(self, in_chl=1, out_chl=1, model_chl=32, artifact_output=False):
         super().__init__()
         self.in_chl = in_chl
         self.out_chl = out_chl
         self.model_chl = model_chl
+        self.artifact_output = artifact_output
 
         self.begin = nn.Sequential(
             ConvBnRelu2d(in_chl, model_chl, kernel_size=3, stride=1, is_bn=False)
@@ -151,6 +154,13 @@ class DenseUNet2d(nn.Module):
                          is_bn=False, is_relu=False)
         )
 
+        if artifact_output:
+            # 恒等起点：输出层近零初始化 → 训练一开始 artifact≈0，clean≈x
+            conv = self.end[0].conv
+            nn.init.normal_(conv.weight, mean=0.0, std=0.001)
+            if conv.bias is not None:
+                nn.init.constant_(conv.bias, 0.0)
+
     def forward(self, x):
         conv0 = self.begin(x)
         conv1, d1 = self.down1(conv0)
@@ -163,4 +173,8 @@ class DenseUNet2d(nn.Module):
         up2 = self.up2(up3, conv2)
         up1 = self.up1(up2, conv1)
         conv6 = self.end(up1)
-        return F.relu(x + conv6)
+        if self.artifact_output:
+            artifact = conv6          # 预测伪影（不加 ReLU，伪影可正可负）
+            clean = x - artifact      # 校正图 = 输入 - 伪影
+            return clean, artifact
+        return F.relu(x + conv6)      # 原行为
