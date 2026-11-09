@@ -18,15 +18,31 @@ from .blocks import (
 )
 
 
-class UNet2d(nn.Module):
-    """Standard U-Net with residual output."""
+def _validate_output_options(residual_output, output_activation, residual_init):
+    """Fail fast on invalid output-switch combinations."""
+    if output_activation not in ("relu", "none"):
+        raise ValueError(
+            f"output_activation must be 'relu' or 'none', got {output_activation!r}"
+        )
+    if residual_init and not residual_output:
+        raise ValueError("residual_init=True requires residual_output=True")
 
-    def __init__(self, in_chl=1, out_chl=1, model_chl=32, artifact_output=False):
+
+class UNet2d(nn.Module):
+    """Standard U-Net with an optional global input-to-output residual."""
+
+    def __init__(self, in_chl=1, out_chl=1, model_chl=32, artifact_output=False,
+                 residual_output=True, output_activation="relu",
+                 residual_init=False):
         super().__init__()
         self.in_chl = in_chl
         self.out_chl = out_chl
         self.model_chl = model_chl
         self.artifact_output = artifact_output
+        self.residual_output = residual_output
+        self.output_activation = output_activation
+        self.residual_init = residual_init
+        _validate_output_options(residual_output, output_activation, residual_init)
 
         self.begin = nn.Sequential(
             ConvBnRelu2d(in_chl, model_chl, kernel_size=3, stride=1, is_bn=False)
@@ -51,6 +67,13 @@ class UNet2d(nn.Module):
                          is_bn=False, is_relu=False)
         )
 
+        if self.residual_init and self.residual_output:
+            # 近零初始化输出头：训练起点 f(x)≈0，整体输出≈输入
+            conv = self.end[0].conv
+            nn.init.normal_(conv.weight, mean=0.0, std=0.001)
+            if conv.bias is not None:
+                nn.init.constant_(conv.bias, 0.0)
+
     def forward(self, x):
         conv0 = self.begin(x)
         conv1, d1 = self.down1(conv0)
@@ -63,7 +86,10 @@ class UNet2d(nn.Module):
         up2 = self.up2(up3, conv2)
         up1 = self.up1(up2, conv1)
         conv6 = self.end(up1)
-        return F.relu(x + conv6)
+        out = x + conv6 if self.residual_output else conv6
+        if self.output_activation == "relu":
+            out = F.relu(out)
+        return out
 
 
 class UNet2dDeepSuperviser(nn.Module):
@@ -74,12 +100,18 @@ class UNet2dDeepSuperviser(nn.Module):
     where each intermediate output can be supervised separately.
     """
 
-    def __init__(self, in_chl=1, out_chl=1, model_chl=32, artifact_output=False):
+    def __init__(self, in_chl=1, out_chl=1, model_chl=32, artifact_output=False,
+                 residual_output=True, output_activation="relu",
+                 residual_init=False):
         super().__init__()
         self.in_chl = in_chl
         self.out_chl = out_chl
         self.model_chl = model_chl
         self.artifact_output = artifact_output
+        self.residual_output = residual_output
+        self.output_activation = output_activation
+        self.residual_init = residual_init
+        _validate_output_options(residual_output, output_activation, residual_init)
 
         self.begin = nn.Sequential(
             ConvBnRelu2d(in_chl, model_chl, kernel_size=3, stride=1, is_bn=False)
@@ -104,6 +136,12 @@ class UNet2dDeepSuperviser(nn.Module):
                          is_bn=False, is_relu=False)
         )
 
+        if self.residual_init and self.residual_output:
+            conv = self.end[0].conv
+            nn.init.normal_(conv.weight, mean=0.0, std=0.001)
+            if conv.bias is not None:
+                nn.init.constant_(conv.bias, 0.0)
+
     def forward(self, x):
         conv0 = self.begin(x)
         conv1, d1 = self.down1(conv0)
@@ -116,7 +154,9 @@ class UNet2dDeepSuperviser(nn.Module):
         up2 = self.up2(up3, conv2)         # intermediate supervision
         up1 = self.up1(up2, conv1)         # intermediate supervision
         conv6 = self.end(up1)
-        res_out = F.relu(x + conv6)        # final output
+        res_out = x + conv6 if self.residual_output else conv6
+        if self.output_activation == "relu":
+            res_out = F.relu(res_out)
         return conv5, up4, up3, up2, res_out
 
 
@@ -127,12 +167,18 @@ class DenseUNet2d(nn.Module):
     This is the primary model used in the original AICT project.
     """
 
-    def __init__(self, in_chl=1, out_chl=1, model_chl=32, artifact_output=False):
+    def __init__(self, in_chl=1, out_chl=1, model_chl=32, artifact_output=False,
+                 residual_output=True, output_activation="relu",
+                 residual_init=False):
         super().__init__()
         self.in_chl = in_chl
         self.out_chl = out_chl
         self.model_chl = model_chl
         self.artifact_output = artifact_output
+        self.residual_output = residual_output
+        self.output_activation = output_activation
+        self.residual_init = residual_init
+        _validate_output_options(residual_output, output_activation, residual_init)
 
         self.begin = nn.Sequential(
             ConvBnRelu2d(in_chl, model_chl, kernel_size=3, stride=1, is_bn=False)
@@ -160,6 +206,12 @@ class DenseUNet2d(nn.Module):
             nn.init.normal_(conv.weight, mean=0.0, std=0.001)
             if conv.bias is not None:
                 nn.init.constant_(conv.bias, 0.0)
+        elif self.residual_init and self.residual_output:
+            # 残差模式下的恒等起点：输出头近零初始化
+            conv = self.end[0].conv
+            nn.init.normal_(conv.weight, mean=0.0, std=0.001)
+            if conv.bias is not None:
+                nn.init.constant_(conv.bias, 0.0)
 
     def forward(self, x):
         conv0 = self.begin(x)
@@ -177,4 +229,7 @@ class DenseUNet2d(nn.Module):
             artifact = conv6          # 预测伪影（不加 ReLU，伪影可正可负）
             clean = x - artifact      # 校正图 = 输入 - 伪影
             return clean, artifact
-        return F.relu(x + conv6)      # 原行为
+        out = x + conv6 if self.residual_output else conv6
+        if self.output_activation == "relu":
+            out = F.relu(out)
+        return out

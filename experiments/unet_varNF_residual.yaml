@@ -1,0 +1,48 @@
+# UNet + global residual on varNF, no physics (arm B, GPU1).
+
+experiment:
+  name: UNet_varNF_Residual
+  seed: 1234
+
+data:
+  reader: proj
+  train_txt: ./varNF_list/train_varNF_views.txt
+  valid_txt: ./varNF_list/valid_varNF_views.txt
+  batch_size: 8
+  valid_batch_size: 4
+  num_workers: 8
+  shuffle: true
+  norm_clip_max: 0.16
+  view_shape: [500, 500]
+  crop_rows: 122
+  crop_cols: 2
+
+model:
+  name: UNet2d
+  in_chl: 1
+  out_chl: 1
+  model_chl: 32
+  residual_output: true
+  output_activation: "none"
+  residual_init: false
+
+loss:
+  mse_weight: 0.0
+  l1_weight: 1.0
+
+optimizer:
+  name: AdamW
+  lr: 0.0001
+  weight_decay: 0.0001
+
+scheduler:
+  name: CosineAnnealingLR
+  t_max: 40
+
+training:
+  epochs: 40
+  save_dir: ./runs/UNet_varNF_Residual
+  log_dir: ./runs/UNet_varNF_Residual
+  log_interval: 50
+  viz_interval: 1
+  save_interval: 5

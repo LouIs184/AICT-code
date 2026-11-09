@@ -17,6 +17,22 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+
+def _preset_cuda_visible_devices(argv):
+    """Set CUDA_VISIBLE_DEVICES before torch is imported.
+
+    Setting it after ``import torch`` leaves PyTorch with a stale device list
+    and raises ``device >= 0 && device < num_gpus`` on ``.cuda()``.
+    """
+    for i, arg in enumerate(argv):
+        if arg == "--gpu" and i + 1 < len(argv):
+            os.environ["CUDA_VISIBLE_DEVICES"] = argv[i + 1]
+        elif arg.startswith("--gpu="):
+            os.environ["CUDA_VISIBLE_DEVICES"] = arg.split("=", 1)[1]
+
+
+_preset_cuda_visible_devices(sys.argv)
+
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -49,11 +65,18 @@ def main():
                              "Default: ./patients.yaml")
     parser.add_argument("--domain", type=str, choices=["phase", "proj"], default="phase",
                         help="Domain: 'phase' (image) or 'proj' (projection).")
+    parser.add_argument("--input-name", type=str, default=None,
+                        help="Input raw filename inside the patient dir. Default: "
+                             "proj_pbi_fs_dec_blur_phase_100000.raw, falling back "
+                             "to proj_pbi_fs_dec_blur_phase.raw.")
+    parser.add_argument("--gt-name", type=str, default=None,
+                        help="GT raw filename inside the patient dir "
+                             "(default: proj_no_pbi.raw).")
     parser.add_argument("--gpu", type=str, default="0",
                         help="GPU device ID.")
 
     args = parser.parse_args()
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+    # CUDA_VISIBLE_DEVICES was already set from --gpu before importing torch.
     os.makedirs(args.output, exist_ok=True)
 
     # Resolve patients: --patient wins, else default to the 'valid' split from
@@ -71,7 +94,10 @@ def main():
     # Build model
     model_cls = MODEL_MAP.get(mc.name, DenseUNet2d)
     model = model_cls(in_chl=mc.in_chl, out_chl=mc.out_chl, model_chl=mc.model_chl,
-                      artifact_output=mc.artifact_output)
+                      artifact_output=mc.artifact_output,
+                      residual_output=mc.residual_output,
+                      output_activation=mc.output_activation,
+                      residual_init=mc.residual_init)
     model = load_model(model, torch.load(args.checkpoint, map_location="cpu"))
     model = model.cuda()
     model.eval()
@@ -155,41 +181,49 @@ def _infer_phase(args, model):
         _compute_metrics(pred_vol, gt_slices, tag="pred  vs gt :")
 
 
+def _first_existing(dir_path, names):
+    """Return the first existing filename in ``names`` (for input-file fallback)."""
+    for name in names:
+        if os.path.exists(os.path.join(dir_path, name)):
+            return name
+    raise FileNotFoundError(f"none of {names} found in {dir_path}")
+
+
 def _infer_proj(args, model):
-    """Projection-domain inference (ProjCT): process (720, 128, 512) volumes."""
+    """Projection-domain inference with config-driven shape / crop / columns."""
     patients = args.patients
 
     # Read config params (must match training)
     from src.config import load_config
+    from src.data.proj_reader import crop_projection, read_raw_volume
     infer_cfg = load_config(args.config)
     crop_rows = getattr(infer_cfg.data, "crop_rows", 0)
+    crop_cols = getattr(infer_cfg.data, "crop_cols", 0)
     norm_clip_max = getattr(infer_cfg.data, "norm_clip_max", 0.28)
-    target_rows = 128 - 2 * crop_rows if crop_rows > 0 else 128
+    view_shape = tuple(getattr(infer_cfg.data, "view_shape", [128, 512]))
 
     for patient in patients:
         print(f"\nTesting {patient} (proj domain) ...")
         patient_dir = os.path.join(args.data_dir, patient)
 
-        vol = np.fromfile(
-            os.path.join(patient_dir, "proj_pbi_fs_dec_blur_phase_100000.raw"),
-            dtype=np.float32,
-        ).reshape(720, 128, 512)
+        input_name = args.input_name or _first_existing(patient_dir, [
+            "proj_pbi_fs_dec_blur_phase_100000.raw",
+            "proj_pbi_fs_dec_blur_phase.raw",
+        ])
+        gt_name = args.gt_name or "proj_no_pbi.raw"
 
-        gt = np.fromfile(
-            os.path.join(patient_dir, "proj_no_pbi.raw"),
-            dtype=np.float32,
-        ).reshape(720, 128, 512)
+        vol = read_raw_volume(os.path.join(patient_dir, input_name), view_shape)
+        gt = read_raw_volume(os.path.join(patient_dir, gt_name), view_shape)
+        n_views = vol.shape[0]
+        print(f"  input: {input_name}  shape={vol.shape}")
 
         # Prepare output directory
         out_dir = os.path.join(args.output, "proj", patient)
         os.makedirs(out_dir, exist_ok=True)
 
         preds = []
-        for i in tqdm(range(720), desc=f"  Inferring {patient}"):
-            s = vol[i]  # (128, 512)
-            # Crop black border rows (must match training)
-            if crop_rows > 0:
-                s = s[crop_rows:-crop_rows, :]
+        for i in tqdm(range(n_views), desc=f"  Inferring {patient}"):
+            s = crop_projection(vol[i], crop_rows, crop_cols)
             s = (np.clip(s, 0, norm_clip_max) / norm_clip_max).astype(np.float32)
             t = torch.FloatTensor(s[np.newaxis, np.newaxis, ...]).cuda()
             with torch.no_grad():
@@ -199,15 +233,11 @@ def _infer_proj(args, model):
             pred = np.squeeze(p.cpu().numpy()) * norm_clip_max
             preds.append(pred)
 
-        pred_vol = np.array(preds)  # (720, target_rows, 512)
+        pred_vol = np.array(preds)  # (n_views, H', W')
 
         # Crop gt & input to same region for fair comparison and saving
-        if crop_rows > 0:
-            gt_cropped = gt[:, crop_rows:-crop_rows, :]
-            input_cropped = vol[:, crop_rows:-crop_rows, :]
-        else:
-            gt_cropped = gt
-            input_cropped = vol
+        gt_cropped = crop_projection(gt, crop_rows, crop_cols)
+        input_cropped = crop_projection(vol, crop_rows, crop_cols)
 
         pred_vol.tofile(os.path.join(out_dir, "pred.raw"))
         gt_cropped.tofile(os.path.join(out_dir, "gt.raw"))

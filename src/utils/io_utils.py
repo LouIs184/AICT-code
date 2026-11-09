@@ -5,18 +5,34 @@ Consolidates the original load_model / save_model variants from the AICT project
 """
 
 import os
+import re
 import torch
+
+
+def _load_state_dict(net, state_dict):
+    """Load weights into ``net`` (or ``net.module`` when DataParallel-wrapped).
+
+    ``save_model`` strips the ``module.`` prefix, but checkpoints saved directly
+    from a DataParallel model may still carry it; tolerate both forms.
+    """
+    target = net.module if hasattr(net, "module") else net
+    if state_dict and any(k.startswith("module.") for k in state_dict):
+        state_dict = {
+            (k[len("module."):] if k.startswith("module.") else k): v
+            for k, v in state_dict.items()
+        }
+    target.load_state_dict(state_dict)
 
 
 def load_model(net, checkpoint):
     """Load model state dict (single-GPU)."""
-    net.load_state_dict(checkpoint["state_dict"])
+    _load_state_dict(net, checkpoint["state_dict"])
     return net
 
 
 def load_model_data_parallel(net, checkpoint):
     """Load model and wrap in DataParallel."""
-    net.load_state_dict(checkpoint["state_dict"])
+    _load_state_dict(net, checkpoint["state_dict"])
     if torch.cuda.is_available() and torch.cuda.device_count() > 1:
         net = torch.nn.DataParallel(net).cuda()
     else:
@@ -25,8 +41,8 @@ def load_model_data_parallel(net, checkpoint):
 
 
 def load_model_model_parallel(net, checkpoint):
-    """Load model (works with both single and multi-GPU checkpoints)."""
-    net.load_state_dict(checkpoint["state_dict"])
+    """Load a checkpoint into a single- or multi-GPU model."""
+    _load_state_dict(net, checkpoint["state_dict"])
     return net
 
 
@@ -46,11 +62,32 @@ def save_model(net, optimizer, scheduler, epoch, save_dir):
     return path
 
 
-def find_lastest_file(file_dir):
-    """Find the most recently modified file in a directory."""
-    files = os.listdir(file_dir)
-    files.sort(key=lambda x: os.path.getmtime(os.path.join(file_dir, x)))
-    return os.path.join(file_dir, files[-1])
+def find_lastest_file(file_dir, prefix="model_at_epoch_", suffix=".dat"):
+    """Return the checkpoint with the largest epoch number in ``file_dir``.
+
+    Only files named ``model_at_epoch_<epoch>.dat`` are considered. The old
+    implementation sorted *all* files by mtime, which picked up ``config.yaml``
+    (rewritten at every start) and made ``--resume`` fail.
+    """
+    if not os.path.isdir(file_dir):
+        raise FileNotFoundError(f"checkpoint directory not found: {file_dir}")
+
+    pattern = re.compile(
+        re.escape(prefix) + r"(\d+)" + re.escape(suffix) + r"$"
+    )
+    candidates = []
+    for name in os.listdir(file_dir):
+        m = pattern.match(name)
+        if m is not None:
+            candidates.append((int(m.group(1)), name))
+
+    if not candidates:
+        raise FileNotFoundError(
+            f"no {prefix}<epoch>{suffix} checkpoint found in {file_dir}"
+        )
+
+    candidates.sort()
+    return os.path.join(file_dir, candidates[-1][1])
 
 
 def load_patients(patients_config_path):

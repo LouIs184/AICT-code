@@ -1,0 +1,59 @@
+# UNet + global input-to-output residual on NF0128
+#
+# A/B arm B: pred = x + f(x). Keep this file and
+# `unet_nf0128_noresidual.yaml` identical except for `model.residual_output`.
+#
+# Data: 18 heads, all NF = 0.1284, 5 dose levels, 100 views each.
+# Preprocessing matches the Restormer NF0128 run: crop 122 rows / 2 cols,
+# clip to [0, 0.047] and scale to [0, 1].
+#
+# Before training, generate the per-view lists:
+#   python scripts/make_nf0128_list.py <restormer-train.txt> nf0128_list/train_nf0128_views.txt
+#   python scripts/make_nf0128_list.py <restormer-valid.txt> nf0128_list/valid_nf0128_views.txt
+
+experiment:
+  name: UNet_NF0128_Residual
+  seed: 1234
+
+data:
+  reader: proj
+  train_txt: ./nf0128_list/train_nf0128_views.txt
+  valid_txt: ./nf0128_list/valid_nf0128_views.txt
+  batch_size: 8
+  valid_batch_size: 4
+  num_workers: 8
+  shuffle: true
+  norm_clip_max: 0.047
+  view_shape: [500, 500]
+  crop_rows: 122
+  crop_cols: 2
+
+model:
+  name: UNet2d
+  in_chl: 1
+  out_chl: 1
+  model_chl: 32
+  residual_output: true     # <-- arm B (this file)
+  output_activation: "none" # corrections can be negative; match Restormer
+  residual_init: false
+
+loss:
+  mse_weight: 0.0
+  l1_weight: 1.0
+
+optimizer:
+  name: AdamW
+  lr: 0.0001
+  weight_decay: 0.0001
+
+scheduler:
+  name: CosineAnnealingLR
+  t_max: 40
+
+training:
+  epochs: 40
+  save_dir: ./runs/UNet_NF0128_Residual
+  log_dir: ./runs/UNet_NF0128_Residual
+  log_interval: 50
+  viz_interval: 1
+  save_interval: 5

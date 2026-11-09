@@ -1,0 +1,72 @@
+# UNet + global residual + physics consistency on varNF (arm A, GPU0)
+#
+# Data: 18 heads, NF 0.16–10.31, fixed dose 1e8, 500 views.
+# Physics target: proj_pbi.raw (clean propagation, same as the Restormer phys run).
+# NF is per-head, loaded from Options/varNF_heads.json via the input path.
+#
+# This file and `unet_varNF_noresidual_phys.yaml` are identical except for
+# `model.residual_output` (and name/save dirs).
+
+experiment:
+  name: UNet_varNF_Residual_Phys
+  seed: 1234
+
+data:
+  reader: proj
+  train_txt: ./varNF_list/train_varNF_views.txt
+  valid_txt: ./varNF_list/valid_varNF_views.txt
+  batch_size: 8
+  valid_batch_size: 4
+  num_workers: 8
+  shuffle: true
+  norm_clip_max: 0.16
+  view_shape: [500, 500]
+  crop_rows: 122
+  crop_cols: 2
+  phys_file: proj_pbi.raw
+  heads_json: ./Options/varNF_heads.json
+  clip_meas: false        # 物理目标保留负值/过冲；true = 复现旧 Restormer 的截断
+
+model:
+  name: UNet2d
+  in_chl: 1
+  out_chl: 1
+  model_chl: 32
+  residual_output: true
+  output_activation: "none"
+  residual_init: false
+
+loss:
+  mse_weight: 0.0
+  l1_weight: 1.0
+
+physics:
+  enable: true
+  loss_weight: 1.0e-2        # lambda calibration: UNet grad ratio ~54-140; 1e-3 too weak
+  pad: 8
+  start_epoch: 5
+  warmup_epochs: 5
+  rho_clip: 10.0
+  normalize_by_signal: true
+  target: file
+  target_file: proj_pbi.raw
+  heads_json: ./Options/varNF_heads.json
+  nf: 0.1284              # fallback only; varNF uses per-head nf from the list
+  grad_clip: 0.0
+
+optimizer:
+  name: AdamW
+  lr: 0.0001
+  weight_decay: 0.0001
+
+scheduler:
+  name: CosineAnnealingLR
+  t_max: 40
+
+training:
+  epochs: 40
+  save_dir: ./runs/UNet_varNF_Residual_Phys
+  log_dir: ./runs/UNet_varNF_Residual_Phys
+  log_interval: 50
+  viz_interval: 1
+  save_interval: 5

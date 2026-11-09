@@ -1,0 +1,55 @@
+# UNet + global residual + near-zero-initialized output head (arm C, optional)
+#
+# This isolates the second mechanism: even with a residual connection, a
+# randomly initialized output head makes the initial output deviate from the
+# input. `residual_init: true` starts training at f(x) ≈ 0, i.e. output ≈ input.
+#
+# Run this only after the A/B (residual vs no-residual) is done, or alongside
+# it if a GPU is free. It is not part of the primary 2-arm comparison.
+
+experiment:
+  name: UNet_NF0128_ResidualInit
+  seed: 1234
+
+data:
+  reader: proj
+  train_txt: ./nf0128_list/train_nf0128_views.txt
+  valid_txt: ./nf0128_list/valid_nf0128_views.txt
+  batch_size: 8
+  valid_batch_size: 4
+  num_workers: 8
+  shuffle: true
+  norm_clip_max: 0.047
+  view_shape: [500, 500]
+  crop_rows: 122
+  crop_cols: 2
+
+model:
+  name: UNet2d
+  in_chl: 1
+  out_chl: 1
+  model_chl: 32
+  residual_output: true
+  output_activation: "none"
+  residual_init: true       # <-- arm C
+
+loss:
+  mse_weight: 0.0
+  l1_weight: 1.0
+
+optimizer:
+  name: AdamW
+  lr: 0.0001
+  weight_decay: 0.0001
+
+scheduler:
+  name: CosineAnnealingLR
+  t_max: 40
+
+training:
+  epochs: 40
+  save_dir: ./runs/UNet_NF0128_ResidualInit
+  log_dir: ./runs/UNet_NF0128_ResidualInit
+  log_interval: 50
+  viz_interval: 1
+  save_interval: 5

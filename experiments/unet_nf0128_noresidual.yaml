@@ -1,0 +1,51 @@
+# UNet WITHOUT the global input-to-output residual on NF0128
+#
+# A/B arm A: pred = f(x). Everything else is identical to
+# `unet_nf0128_residual.yaml` — only `model.residual_output` differs.
+
+experiment:
+  name: UNet_NF0128_NoResidual
+  seed: 1234
+
+data:
+  reader: proj
+  train_txt: ./nf0128_list/train_nf0128_views.txt
+  valid_txt: ./nf0128_list/valid_nf0128_views.txt
+  batch_size: 8
+  valid_batch_size: 4
+  num_workers: 8
+  shuffle: true
+  norm_clip_max: 0.047
+  view_shape: [500, 500]
+  crop_rows: 122
+  crop_cols: 2
+
+model:
+  name: UNet2d
+  in_chl: 1
+  out_chl: 1
+  model_chl: 32
+  residual_output: false    # <-- arm A (this file)
+  output_activation: "none"
+  residual_init: false
+
+loss:
+  mse_weight: 0.0
+  l1_weight: 1.0
+
+optimizer:
+  name: AdamW
+  lr: 0.0001
+  weight_decay: 0.0001
+
+scheduler:
+  name: CosineAnnealingLR
+  t_max: 40
+
+training:
+  epochs: 40
+  save_dir: ./runs/UNet_NF0128_NoResidual
+  log_dir: ./runs/UNet_NF0128_NoResidual
+  log_interval: 50
+  viz_interval: 1
+  save_interval: 5

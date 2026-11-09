@@ -15,9 +15,12 @@ from __future__ import annotations
 import os
 import time
 import math
+import random
 
+import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.backends import cudnn
@@ -26,7 +29,8 @@ from tqdm import tqdm
 from datetime import datetime
 
 from src.config import Config, save_config
-from src.models import UNet2d, UNet2dDeepSuperviser, DenseUNet2d, Discriminator2D
+from src.models import (UNet2d, UNet2dDeepSuperviser, DenseUNet2d,
+                        Discriminator2D, PhysConsistency)
 from src.losses import CharbonnierLoss, SSIM, vgg_feature_extractor, vgg_loss_calc, TVLoss, FocalMSE, FocalFrequencyLoss
 from src.losses import MultiDirectionalSobelLoss, FFTAmplitudeLoss, AngularGradLoss
 from src.data import raw_reader, dicom_reader, proj_reader
@@ -55,6 +59,20 @@ OPTIMIZER_MAP = {
     "AdamW": optim.AdamW,
     "SophiaG": SophiaG,
 }
+
+
+def _set_seed(seed: int):
+    """Seed Python / NumPy / PyTorch RNGs before building data + model.
+
+    Paired A/B runs (e.g. residual vs no-residual) rely on identical weight
+    initialization and shuffle order, so this must run before DataLoader and
+    model construction.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def _build_optimizer(model, cfg):
@@ -113,6 +131,7 @@ class Trainer:
     def __init__(self, config: Config, verbose: bool = True):
         self.cfg = config
         self.verbose = verbose
+        _set_seed(config.experiment.seed)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         cudnn.benchmark = True
@@ -120,6 +139,7 @@ class Trainer:
         self._build_dataloaders()
         self._build_model()
         self._build_losses()
+        self._build_physics()
         self._build_optimizers()
         self._build_schedulers()
         self._build_writer()
@@ -157,8 +177,17 @@ class Trainer:
         elif dc.reader == "proj":
             reader_kwargs["norm_clip_max"] = dc.norm_clip_max
             reader_kwargs["crop_rows"] = dc.crop_rows
+            reader_kwargs["crop_cols"] = dc.crop_cols
+            reader_kwargs["view_shape"] = tuple(dc.view_shape)
 
-        self.train_dataset = reader_cls(paired_img_txt=dc.train_txt, **reader_kwargs)
+        train_kwargs = dict(reader_kwargs)
+        if dc.reader == "proj":
+            # 物理目标与 per-head NF 只训练集需要；验证不反传，省 I/O
+            train_kwargs["phys_file"] = dc.phys_file
+            train_kwargs["heads_json"] = dc.heads_json
+            train_kwargs["clip_meas"] = dc.clip_meas
+
+        self.train_dataset = reader_cls(paired_img_txt=dc.train_txt, **train_kwargs)
         self.valid_dataset = reader_cls(paired_img_txt=dc.valid_txt, **reader_kwargs)
 
         self.train_loader = DataLoader(
@@ -179,7 +208,10 @@ class Trainer:
             raise ValueError(f"Unknown model: {mc.name} (available: {list(MODEL_MAP.keys())})")
 
         model = model_cls(in_chl=mc.in_chl, out_chl=mc.out_chl, model_chl=mc.model_chl,
-                          artifact_output=mc.artifact_output)
+                          artifact_output=mc.artifact_output,
+                          residual_output=mc.residual_output,
+                          output_activation=mc.output_activation,
+                          residual_init=mc.residual_init)
 
         # Multi-GPU
         if torch.cuda.is_available() and torch.cuda.device_count() > 1:
@@ -198,12 +230,33 @@ class Trainer:
         if self.cfg.loss.adv_weight > 0:
             self.discriminator = Discriminator2D().to(self.device)
 
+    def _build_physics(self):
+        """Build the forward propagation module (optional)."""
+        pc = self.cfg.physics
+        self.phys = None
+        if not pc.enable:
+            return
+        clip = self.cfg.data.norm_clip_max
+        if clip is None or float(clip) <= 0:
+            raise ValueError(
+                "physics.enable=True requires data.norm_clip_max > 0")
+        if pc.target == "file" and not self.cfg.data.phys_file:
+            raise ValueError(
+                "physics.target='file' requires data.phys_file to be set")
+        self.phys = PhysConsistency(float(clip), pc.pad).to(self.device)
+        if self.verbose:
+            print(f"[Physics] enabled: lambda={pc.loss_weight}, pad={pc.pad}, "
+                  f"start_epoch={pc.start_epoch}, warmup={pc.warmup_epochs}, "
+                  f"target={pc.target}, target_file={pc.target_file}")
+
     def _build_losses(self):
         lc = self.cfg.loss
         self.criterion_mse = nn.MSELoss()
         self.criterion_l1 = nn.L1Loss()
         self.criterion_charbonnier = CharbonnierLoss(eps=lc.charbonnier_eps)
-        self.criterion_ssim = SSIM()
+        # AICT readers normalize to [0, 1]; a fixed range keeps SSIM
+        # independent of the prediction's own extrema.
+        self.criterion_ssim = SSIM(data_range=1.0)
         self.criterion_tv = TVLoss()
         self.criterion_fft_amp = FFTAmplitudeLoss().to(self.device)
         self.criterion_angular = AngularGradLoss().to(self.device)
@@ -347,6 +400,42 @@ class Trainer:
 
         return loss, losses
 
+    def _compute_phys_loss(self, pred, gt, nf, meas, epoch):
+        """物理一致性损失：A(pred) 与传播目标 M 的相对误差 ρ。
+
+        M 优先用 dataloader 给的 ``meas``（varNF 的 proj_pbi.raw）；
+        没有时退回在线 ``A(gt)``。
+        """
+        pc = self.cfg.physics
+        if self.phys is None or epoch < pc.start_epoch:
+            return None, None
+
+        if nf is None:
+            nf = torch.full((pred.size(0),), float(pc.nf),
+                            device=pred.device, dtype=pred.dtype)
+        else:
+            nf = nf.to(pred.device).reshape(-1).to(pred.dtype)
+
+        a_pred = self.phys(pred, nf)
+        if meas is None:
+            with torch.no_grad():
+                m = self.phys(gt, nf)
+        else:
+            m = meas.to(pred.device, dtype=pred.dtype)
+
+        if pc.normalize_by_signal:
+            with torch.no_grad():
+                sig = (m - gt).pow(2).flatten(1).mean(1).sqrt().clamp_min(1e-6)
+            rho = (a_pred - m).pow(2).flatten(1).mean(1).sqrt() / sig
+            if pc.rho_clip > 0:
+                rho = rho.clamp(max=pc.rho_clip)
+            l_phys = rho.mean()
+        else:
+            l_phys = F.l1_loss(a_pred, m)
+            rho = l_phys.detach()
+
+        return l_phys, rho.mean()
+
     # ------------------------------------------------------------------
     # Training / validation
     # ------------------------------------------------------------------
@@ -379,7 +468,9 @@ class Trainer:
                 self._train_gan_step(ldct, rdct, loss_meters, pbar, step, epoch)
             else:
                 # ======== Standard training ========
-                self._train_standard_step(ldct, rdct, loss_meters, pbar, step, epoch)
+                self._train_standard_step(
+                    ldct, rdct, loss_meters, pbar, step, epoch,
+                    nf=data.get("nf"), meas=data.get("meas"))
 
             batch_time.update(time.time() - end)
             end = time.time()
@@ -404,7 +495,8 @@ class Trainer:
                 loss_meters[name] = AverageMeter()
             loss_meters[name].update(val.item(), n)
 
-    def _train_standard_step(self, ldct, rdct, loss_meters, pbar, step, epoch):
+    def _train_standard_step(self, ldct, rdct, loss_meters, pbar, step, epoch,
+                             nf=None, meas=None):
         cfg = self.cfg
         model = self.model
 
@@ -439,8 +531,26 @@ class Trainer:
         else:
             loss, loss_dict = self._compute_loss(model_out, rdct)
 
+        # ---- 物理一致性损失（可选）----
+        if self.phys is not None:
+            l_phys, rho = self._compute_phys_loss(
+                predict_for_viz, rdct, nf, meas, epoch)
+            if l_phys is not None:
+                pc = cfg.physics
+                w = pc.loss_weight * min(
+                    1.0,
+                    (epoch - pc.start_epoch + 1) / max(pc.warmup_epochs, 1))
+                loss = loss + w * l_phys
+                loss_dict["l_phys"] = l_phys.detach()
+                loss_dict["rho"] = rho.detach()
+                loss_dict["lambda_eff"] = torch.tensor(
+                    w, device=ldct.device, dtype=ldct.dtype)
+
         self.optimizer.zero_grad()
         loss.backward()
+        if self.phys is not None and cfg.physics.grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(), cfg.physics.grad_clip)
         self.optimizer.step()
 
         self._update_loss_meters(loss_meters, loss_dict, ldct.size(0))

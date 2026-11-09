@@ -39,6 +39,11 @@ class DataConfig:
     hu_min: float = -1000.0                 # used by raw_reader: HU 归一化下界
     hu_max: float = 1000.0                  # used by raw_reader: HU 归一化上界
     crop_rows: int = 0                      # 投影域上下裁剪行数 (0=不裁剪, 8→112, 10→108)
+    crop_cols: int = 0                      # 投影域左右裁剪列数 (0=不裁剪)
+    view_shape: list = field(default_factory=lambda: [128, 512])  # 单视角形状 (H, W)
+    phys_file: str = ""                     # 物理损失目标图（与输入同目录）；空=不读
+    heads_json: str = ""                    # 头号 -> (a, z) 的 JSON；空=不做 per-head NF
+    clip_meas: bool = False                 # 物理目标是否也 clip 到 [0, clip_max]；默认保留有符号原值
     shuffle: bool = True
 
 
@@ -50,6 +55,9 @@ class ModelConfig:
     out_chl: int = 1
     model_chl: int = 32
     artifact_output: bool = False   # true: 输出 (clean, artifact)，clean = x - artifact（恒等起点）
+    residual_output: bool = True    # true: 全局输入→输出残差 x + f(x)；false: 直接预测 f(x)
+    output_activation: str = "relu" # 输出端激活："relu" | "none"
+    residual_init: bool = False     # true: 输出头近零初始化（需 residual_output=True）
 
 
 @dataclass
@@ -84,6 +92,23 @@ class LossConfig:
     fft_amp_weight: float = 0.0     # FFT 幅值 L1 权重（同学用 0.8）
     angular_weight: float = 0.0     # 沿末维梯度 L1 权重（同学用 0.8）
     sobel_weight: float = 0.0       # 多向 Sobel 梯度 L1 权重（同学用 0.3）
+
+
+@dataclass
+class PhysicsConfig:
+    """物理一致性损失（pred -> 正向传播 -> 与目标图算 rho）。"""
+    enable: bool = False
+    loss_weight: float = 1e-3              # λ
+    pad: int = 8                           # 传播前 reflect padding
+    start_epoch: int = 5                   # 前 start_epoch 个 epoch 只训练监督项
+    warmup_epochs: int = 5                 # 之后 λ 线性升到满值
+    rho_clip: float = 10.0                 # ρ 截断
+    normalize_by_signal: bool = True       # ρ 除以 RMS(M-GT)
+    target: str = "file"                   # "file" | "gt"
+    target_file: str = "proj_pbi.raw"      # target=file 时的文件名
+    heads_json: str = ""                   # per-head NF 表
+    nf: float = 0.1284                     # 没有 per-sample nf 时的常量
+    grad_clip: float = 0.0                 # >0 时对物理项训练做梯度裁剪
 
 
 @dataclass
@@ -147,6 +172,7 @@ class Config:
     gan: GANConfig = field(default_factory=GANConfig)
     augment: AugmentConfig = field(default_factory=AugmentConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
+    physics: PhysicsConfig = field(default_factory=PhysicsConfig)
 
 
 # ---------------------------------------------------------------------------
